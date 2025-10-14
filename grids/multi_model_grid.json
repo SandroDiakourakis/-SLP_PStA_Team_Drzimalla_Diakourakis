@@ -1,0 +1,15 @@
+{
+  "SVC": {
+    "C": [0.1, 1, 10],
+    "kernel": ["linear", "rbf"],
+    "gamma": ["scale", "auto"]
+  },
+  "LogisticRegression": {
+    "C": [0.01, 0.1, 1, 10],
+    "penalty": ["l2"],
+    "solver": ["saga", "liblinear"]
+  },
+  "RandomForestClassifier": {
+    "n_estimators": [50, 100],
+    "max_depth": [5, 10, null]
+}
