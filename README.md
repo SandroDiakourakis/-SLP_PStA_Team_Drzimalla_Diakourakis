@@ -61,3 +61,12 @@ Example entry:
 - **Result:** Best accuracy 91.4% (C=10, gamma=0.01)
 - **Notes:** Consider scaling features differently for next run.
 ```
+
+## Use virutal environments
+To manage dependencies, please use a virtual environment. You can create one using `venv` or `conda`.
+Example using `venv`:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+pip install -r requirements.txt
+```

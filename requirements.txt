@@ -1,4 +1,30 @@
+# Core ML/DL
+torch
+torchaudio
+transformers
+datasets
+
+# Classical ML
+xgboost
+lightgbm
 scikit-learn
+
+# Audio Processing
+librosa
+soundfile
+opensmile
+
+# Data & Config
 pandas
 numpy
+hydra-core
+omegaconf
+
+# Visualization & Metrics
+matplotlib
+seaborn
+
+# Utilities
+tqdm
+pyyaml
 joblib
