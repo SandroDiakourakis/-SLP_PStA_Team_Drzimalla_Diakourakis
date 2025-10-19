@@ -1,0 +1,64 @@
+defaults:
+  - config
+
+experiment_name: "baseline_ml_xgboost"
+
+# Feature Extraction
+features:
+  type: "mfcc+egemaps"
+  mfcc:
+    n_mfcc: 13
+    n_fft: 2048
+    hop_length: 512
+    n_mels: 40
+    include_deltas: true
+    include_delta_deltas: true
+  egemaps:
+    feature_set: "eGeMAPSv02"
+    feature_level: "functionals"
+  statistics:
+    - mean
+    - std          # ← Standard deviation (F0_std ist key feature!)
+    - min
+    - max
+    - skewness
+    - kurtosis
+    - median       # ← HINZUFÜGEN
+    - iqr          # ← HINZUFÜGEN (Interquartile Range)
+
+# Model
+model:
+  name: "xgboost"
+  params:
+    objective: "multi:softmax"
+    eval_metric: "mlogloss"
+    max_depth: 8              # Increase tree depth
+    learning_rate: 0.03       # Lower learning rate
+    n_estimators: 500         # More trees
+    subsample: 0.8
+    colsample_bytree: 0.8
+    min_child_weight: 1        # ← Reduziert (für kleine Klassen)
+    gamma: 0.1
+    random_state: 42
+    tree_method: "hist"
+    device: "cpu"
+
+  # WICHTIG: Aktive Class-Balancing-Strategie
+  class_balancing: "scale_pos_weight"
+
+  # NEU: Sample Weighting (Alternative)
+  use_sample_weights: true
+  weight_strategy: "balanced"  # oder "inverse_frequency"
+
+# Training
+training:
+  cv_folds: 5
+  early_stopping_rounds: 30
+
+# Evaluation
+evaluation:
+  primary_metric: "macro_f1"
+  save_confusion_matrix: true
+  save_feature_importance: true
+  compute_per_class_f1: true
+  compute_auc: true  # AUC-ROC für probabilistische Vorhersagen

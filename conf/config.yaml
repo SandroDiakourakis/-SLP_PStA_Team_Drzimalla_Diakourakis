@@ -1,0 +1,54 @@
+# Base Configuration for SAND Task 1
+defaults:
+  - _self_
+
+# Experiment
+seed: 42
+experiment_name: "sand_task1_baseline"
+output_dir: "runs"
+
+# Data
+data:
+  root_dir: "data/task1/training"
+  manifest_dir: "data/manifests"
+  metadata_file: "data/task1/sand_task_1.xlsx"
+  sample_rate: 8000
+  tasks:
+    - phonationA
+    - phonationE
+    - phonationI
+    - phonationO
+    - phonationU
+    - rhythmKA
+    - rhythmPA
+    - rhythmTA
+
+# Labels
+labels:
+  num_classes: 5
+  class_names:
+    - "ALS_Severe (1)"        # ALSFRS-R Speech = 1
+    - "ALS_Moderate (2)"      # ALSFRS-R Speech = 2
+    - "ALS_Mild (3)"          # ALSFRS-R Speech = 3
+    - "ALS_None (4)"          # ALSFRS-R Speech = 4 (Non-Dysarthric)
+    - "Healthy (5)"           # Healthy Controls
+  label_mapping:
+    1: "ALS_Severe (1)"
+    2: "ALS_Moderate (2)"
+    3: "ALS_Mild (3)"
+    4: "ALS_None (4)"
+    5: "Healthy (5)"
+
+# Split
+split:
+  test_size: 0.2
+  stratify: true
+  min_samples_per_subject: 1
+
+# Device
+device: "mps"  # For M2 Max; use "cpu" as fallback
+
+# Logging
+verbose: true
+save_predictions: true
+save_metrics: true
