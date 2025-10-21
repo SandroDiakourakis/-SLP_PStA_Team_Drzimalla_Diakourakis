@@ -64,7 +64,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "sandcli=sandcli.main:cli",
+            "sandcli=sandcli.cli:main",
         ],
     },
     include_package_data=True,

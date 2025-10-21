@@ -13,7 +13,7 @@ import logging
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from sandcli import prep, split, featurize, train, eval, predict, ensemble
+from sandcli import prep, split, featurize, train, evaluate, predict, ensemble
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +28,12 @@ def setup_logging(verbose: bool = True):
     )
 
 
-@hydra.main(version_base=None, config_path="../conf", config_name="config")
+# Dynamischer config_path
+_project_root = Path(__file__).parent.parent
+_config_path = str(_project_root / "conf")
+
+
+@hydra.main(version_base=None, config_path=_config_path, config_name="config")
 def cli(cfg: DictConfig) -> None:
     """
     Main CLI dispatcher
@@ -38,7 +43,7 @@ def cli(cfg: DictConfig) -> None:
         python -m sandcli.main command=split
         python -m sandcli.main command=featurize
         python -m sandcli.main command=train
-        python -m sandcli.main command=eval
+        python -m sandcli.main command=evaluate    # ← CHANGED
         python -m sandcli.main command=predict
         python -m sandcli.main command=ensemble
     """
@@ -47,7 +52,7 @@ def cli(cfg: DictConfig) -> None:
     command = cfg.get('command', None)
 
     if command is None:
-        log.error("No command specified. Use command=<prep|split|featurize|train|eval|predict|ensemble>")
+        log.error("No command specified. Use command=<prep|split|featurize|train|evaluate|predict|ensemble>")
         sys.exit(1)
 
     log.info(f"Running command: {command}")
@@ -59,7 +64,7 @@ def cli(cfg: DictConfig) -> None:
         'split': split.run,
         'featurize': featurize.run,
         'train': train.run,
-        'eval': eval.run,
+        'evaluate': evaluate.run,
         'predict': predict.run,
         'ensemble': ensemble.run,
     }

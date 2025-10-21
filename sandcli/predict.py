@@ -202,6 +202,71 @@ def main():
 
     # Validate inputs
     if not model_path.exists():
+        print(f"Error: Model not found: {model_path}")
+        sys.exit(1)
+
+    if not manifest_path.exists():
+        print(f"Error: Manifest not found: {manifest_path}")
+        sys.exit(1)
+
+    # Load model
+    model = load_model(model_path)
+
+    # Load features
+    X, file_ids = load_features(manifest_path, feature_dir)
+
+    # Generate predictions
+    results = predict_and_save(
+        model,
+        X,
+        file_ids,
+        label_encoder_path,
+        output_path,
+        args.include_probabilities
+    )
+
+    print("\n✓ Prediction complete!")
+
+
+def run(cfg):
+    """
+    Run prediction from Hydra config.
+
+    Args:
+        cfg: Hydra configuration object
+    """
+    import logging
+    log = logging.getLogger(__name__)
+
+    log.info("=" * 80)
+    log.info("PREDICTION")
+    log.info("=" * 80)
+
+    # Get paths from config
+    model_path = Path(cfg.get('model_path', 'runs/latest/model.pkl'))
+    input_dir = Path(cfg.get('input_dir', 'data/task1/test'))
+    output_dir = Path(cfg.get('output_dir', 'predictions'))
+
+    if not model_path.exists():
+        log.error(f"Model not found: {model_path}")
+        log.error("Please specify a valid model_path")
+        return
+
+    log.info(f"Model: {model_path}")
+    log.info(f"Input: {input_dir}")
+    log.info(f"Output: {output_dir}")
+
+    log.warning("⚠ Prediction module requires additional implementation for full pipeline integration")
+    log.warning("For now, use the standalone script with --model_path, --manifest, etc.")
+    log.info("\nExample:")
+    log.info("  python -m sandcli.predict --model_path runs/exp/model.pkl --manifest data/manifests/test_manifest.csv ...")
+
+
+if __name__ == "__main__":
+    main()
+
+    # Validate inputs
+    if not model_path.exists():
         print(f"Error: Model not found at {model_path}")
         sys.exit(1)
 

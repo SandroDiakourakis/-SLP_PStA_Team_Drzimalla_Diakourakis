@@ -83,7 +83,12 @@ class XGBoostModel(MLModelWrapper):
         class_weights = self._compute_class_weights(y_encoded)
 
         # Update params with num_class
-        params = self.params.copy()
+        # Convert to dict if it's a DictConfig (from Hydra)
+        if hasattr(self.params, 'items'):
+            params = dict(self.params)
+        else:
+            params = self.params.copy()
+
         params['num_class'] = len(self.class_names)
         params['scale_pos_weight'] = class_weights  # Only works for binary; use sample_weight for multi-class
 

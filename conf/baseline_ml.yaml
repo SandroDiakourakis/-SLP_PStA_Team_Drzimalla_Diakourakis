@@ -5,7 +5,7 @@ experiment_name: "baseline_ml_xgboost"
 
 # Feature Extraction
 features:
-  type: "mfcc+egemaps"
+  type: "mfcc"  # Changed from "mfcc+egemaps" to match extracted features
   mfcc:
     n_mfcc: 13
     n_fft: 2048

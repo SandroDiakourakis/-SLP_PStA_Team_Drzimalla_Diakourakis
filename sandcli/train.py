@@ -10,6 +10,8 @@ import numpy as np
 from omegaconf import DictConfig
 import json
 from datetime import datetime
+from sklearn.preprocessing import LabelEncoder
+import pickle
 
 from models.ml_models import create_ml_model, cross_validate_model
 from sandcli.utils.metrics import compute_metrics, plot_confusion_matrix
@@ -40,7 +42,7 @@ def load_features_from_manifest(manifest_path: Path) -> tuple:
     y = np.array(labels)
 
     log.info(f"Loaded features: {X.shape}")
-    log.info(f"Label distribution: {pd.Series(y).value_counts().to_dict()}")
+    log.info(f"Label distribution (before encoding):\n{pd.Series(y).value_counts().to_dict()}")
 
     return X, y, df
 
@@ -51,11 +53,12 @@ def run(cfg: DictConfig) -> None:
 
     Steps:
     1. Load features from manifest
-    2. Create model (XGBoost or LightGBM)
-    3. Optionally perform cross-validation
-    4. Train final model on full training set
-    5. Evaluate on test set
-    6. Save model and results
+    2. Encode labels (text to integers)
+    3. Create model (XGBoost or LightGBM)
+    4. Optionally perform cross-validation
+    5. Train final model on full training set
+    6. Evaluate on test set
+    7. Save model and results
     """
     log.info("=" * 80)
     log.info("STEP 4: MODEL TRAINING (ML)")
@@ -87,8 +90,30 @@ def run(cfg: DictConfig) -> None:
     log.info("Loading test data...")
     X_test, y_test, test_df = load_features_from_manifest(test_manifest)
 
+    # Encode labels (convert text labels to integers)
+    log.info("\nEncoding labels...")
+    label_encoder = LabelEncoder()
+
+    # Fit on all unique labels from both train and test
+    all_labels = np.concatenate([y_train, y_test])
+    label_encoder.fit(all_labels)
+
+    # Transform labels
+    y_train_encoded = label_encoder.transform(y_train)
+    y_test_encoded = label_encoder.transform(y_test)
+
+    log.info(f"Label classes: {label_encoder.classes_}")
+    log.info(f"Encoded train labels: {np.unique(y_train_encoded)}")
+    log.info(f"Label distribution (train): {pd.Series(y_train_encoded).value_counts().to_dict()}")
+
+    # Save label encoder
+    label_encoder_path = exp_dir / "label_encoder.pkl"
+    with open(label_encoder_path, 'wb') as f:
+        pickle.dump(label_encoder, f)
+    log.info(f"Label encoder saved to: {label_encoder_path}")
+
     # Get class names
-    class_names = cfg.labels.class_names
+    class_names = list(label_encoder.classes_)
 
     # Create model
     model_name = cfg.model.name
@@ -110,7 +135,7 @@ def run(cfg: DictConfig) -> None:
         cv_results = cross_validate_model(
             model_class,
             X_train,
-            y_train,
+            y_train_encoded,
             cfg.model.params,
             class_names,
             n_folds=cfg.training.cv_folds,
@@ -124,7 +149,7 @@ def run(cfg: DictConfig) -> None:
     # Train final model on full training set
     log.info("\nTraining final model on full training set...")
     model = create_ml_model(model_name, cfg.model.params, class_names)
-    model.fit(X_train, y_train, X_test, y_test)
+    model.fit(X_train, y_train_encoded, X_test, y_test_encoded)
 
     # Save model
     model_path = exp_dir / "model.pkl"
@@ -135,8 +160,8 @@ def run(cfg: DictConfig) -> None:
     y_pred = model.predict(X_test)
     y_pred_proba = model.predict_proba(X_test)
 
-    # Compute metrics
-    metrics = compute_metrics(y_test, y_pred, y_pred_proba, class_names)
+    # Compute metrics (using encoded labels)
+    metrics = compute_metrics(y_test_encoded, y_pred, y_pred_proba, class_names)
 
     # Log metrics
     log.info("\n" + "=" * 80)
@@ -159,7 +184,7 @@ def run(cfg: DictConfig) -> None:
 
     # Save predictions
     predictions_df = test_df.copy()
-    predictions_df['predicted_label'] = y_pred
+    predictions_df['predicted_label'] = [label_encoder.inverse_transform([p])[0] for p in y_pred]
     predictions_df['true_label'] = y_test
 
     # Add probabilities
@@ -184,5 +209,5 @@ def run(cfg: DictConfig) -> None:
 
 if __name__ == "__main__":
     from sandcli.main import cli
-
     cli()
+

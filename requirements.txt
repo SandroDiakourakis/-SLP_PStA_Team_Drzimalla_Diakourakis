@@ -28,3 +28,5 @@ seaborn
 tqdm
 pyyaml
 joblib
+regex
+openpyxl

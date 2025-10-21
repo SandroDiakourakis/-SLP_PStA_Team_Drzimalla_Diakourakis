@@ -2,6 +2,8 @@
 defaults:
   - _self_
 
+command: null
+
 # Experiment
 seed: 42
 experiment_name: "sand_task1_baseline"
@@ -44,6 +46,39 @@ split:
   test_size: 0.2
   stratify: true
   min_samples_per_subject: 1
+
+# Feature Extraction (defaults)
+features:
+  type: "mfcc"
+  mfcc:
+    n_mfcc: 13
+    n_fft: 2048
+    hop_length: 512
+    n_mels: 40
+    include_deltas: true
+    include_delta_deltas: true
+    statistics:
+      - mean
+      - std
+  egemaps:
+    feature_set: "eGeMAPSv02"
+    feature_level: "functionals"
+
+# Model (defaults)
+model:
+  name: "xgboost"
+  params:
+    objective: "multi:softmax"
+    eval_metric: "mlogloss"
+    max_depth: 6
+    learning_rate: 0.1
+    n_estimators: 100
+    random_state: 42
+
+# Training
+training:
+  cv_folds: 0
+  early_stopping_rounds: 10
 
 # Device
 device: "mps"  # For M2 Max; use "cpu" as fallback

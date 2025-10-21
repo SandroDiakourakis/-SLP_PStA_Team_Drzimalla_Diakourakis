@@ -201,9 +201,20 @@ def run(cfg: DictConfig) -> None:
         for idx, row in tqdm(df.iterrows(), total=len(df), desc=f"Extracting {split}"):
             file_path = Path(row['file_path'])
 
+            # Make path absolute by prepending data root
+            # Paths in manifest are relative to data root (e.g., "training/phonationA/ID001.wav")
+            # We need to resolve them to "data/task1/training/phonationA/ID001.wav"
+            if not file_path.is_absolute():
+                # Get the parent of the first directory in the path
+                # If path is "training/phonationA/ID001.wav", we need "data/task1/"
+                root_dir = Path(cfg.data.root_dir).parent  # data/task1/training -> data/task1
+                full_path = root_dir / file_path
+            else:
+                full_path = file_path
+
             # Extract features
             features = extract_features_for_file(
-                str(file_path),
+                str(full_path),
                 extractors,
                 cfg.data.sample_rate,
                 preprocess=True

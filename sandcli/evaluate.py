@@ -21,6 +21,7 @@ from sandcli.utils.visualization import (
     generate_results_summary,
     save_metrics_json
 )
+from omegaconf import DictConfig
 
 # Setup logging
 logging.basicConfig(
@@ -354,6 +355,7 @@ def evaluate_model(
 
 
 def main():
+    """Standalone CLI entry point (for direct execution)"""
     parser = argparse.ArgumentParser(
         description="Evaluate trained model on test set for SAND Task 1",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
@@ -465,6 +467,71 @@ def main():
     print(f"PRIMARY METRIC (Macro F1): {metrics['macro_f1']:.4f}")
     print(f"{'🎯' * 20}\n")
 
+
+def run(cfg: DictConfig) -> None:
+    """
+    Hydra-compatible evaluation function
+
+    This is called by main.py when using: python -m sandcli.main command=evaluate
+    """
+    from omegaconf import DictConfig
+
+    log.info("=" * 80)
+    log.info("STEP 5: MODEL EVALUATION")
+    log.info("=" * 80)
+
+    # Parse required arguments from config
+    model_path = Path(cfg.get('model_path'))
+    manifest_path = Path(cfg.get('manifest'))
+    feature_dir = Path(cfg.get('feature_dir'))
+    label_encoder_path = Path(cfg.get('label_encoder'))
+    output_dir = Path(cfg.get('output_dir'))
+    model_name = cfg.get('model_name', 'Model')
+    model_type = cfg.get('model_type', 'ml')
+
+    # Validate inputs
+    if not model_path.exists():
+        log.error(f"Model not found at {model_path}")
+        sys.exit(1)
+
+    if not manifest_path.exists():
+        log.error(f"Manifest not found at {manifest_path}")
+        sys.exit(1)
+
+    if not feature_dir.exists():
+        log.error(f"Feature directory not found at {feature_dir}")
+        sys.exit(1)
+
+    if not label_encoder_path.exists():
+        log.error(f"Label encoder not found at {label_encoder_path}")
+        sys.exit(1)
+
+    # Load model
+    model = load_model(model_path)
+
+    # Load label encoder
+    with open(label_encoder_path, 'rb') as f:
+        label_encoder = pickle.load(f)
+    class_names = list(label_encoder.classes_)
+
+    # Load features and labels
+    X, y_true, subject_ids, file_ids = load_features_and_labels(
+        manifest_path, feature_dir, label_encoder_path
+    )
+
+    # Evaluate
+    metrics = evaluate_model(
+        model=model,
+        X=X,
+        y_true=y_true,
+        class_names=class_names,
+        output_dir=output_dir,
+        model_name=model_name,
+        model_type=model_type
+    )
+
+    log.info(f"\n✅ Evaluation complete!")
+    log.info(f"\n🎯 PRIMARY METRIC (Macro F1): {metrics['macro_f1']:.4f}\n")
 
 if __name__ == "__main__":
     main()
