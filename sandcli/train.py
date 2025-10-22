@@ -11,12 +11,192 @@ from omegaconf import DictConfig
 import json
 from datetime import datetime
 from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
+from sklearn.utils.class_weight import compute_sample_weight
 import pickle
 
 from models.ml_models import create_ml_model, cross_validate_model
 from sandcli.utils.metrics import compute_metrics, plot_confusion_matrix
 
 log = logging.getLogger(__name__)
+
+
+def apply_smote(X, y, cfg):
+    """Apply SMOTE oversampling for minority classes"""
+    if not cfg.training.get('use_smote', False):
+        return X, y
+
+    try:
+        from imblearn.over_sampling import SMOTE
+        log.info("\n⚖️  Applying SMOTE for class balancing...")
+
+        smote = SMOTE(
+            k_neighbors=cfg.training.get('smote_k_neighbors', 5),
+            random_state=cfg.seed
+        )
+        X_resampled, y_resampled = smote.fit_resample(X, y)
+
+        log.info(f"   Before SMOTE: {X.shape[0]} samples")
+        log.info(f"   After SMOTE:  {X_resampled.shape[0]} samples")
+
+        return X_resampled, y_resampled
+    except ImportError:
+        log.warning("⚠️  imbalanced-learn not installed. Skipping SMOTE.")
+        log.warning("   Install with: pip install imbalanced-learn")
+        return X, y
+
+
+def tune_hyperparameters(X_train, y_train, cfg, class_names):
+    """Perform GridSearch for hyperparameter tuning"""
+    log.info("\n" + "=" * 80)
+    log.info("HYPERPARAMETER TUNING (GridSearch)")
+    log.info("=" * 80)
+
+    import xgboost as xgb
+
+    # Get tuning grid from config
+    param_grid = {
+        'max_depth': cfg.training.tuning_grid.get('max_depth', [8, 10, 12]),
+        'learning_rate': cfg.training.tuning_grid.get('learning_rate', [0.01, 0.03, 0.05]),
+        'n_estimators': cfg.training.tuning_grid.get('n_estimators', [500, 1000]),
+        'min_child_weight': cfg.training.tuning_grid.get('min_child_weight', [1, 3]),
+        'gamma': cfg.training.tuning_grid.get('gamma', [0.1, 0.2]),
+    }
+
+    total_combinations = np.prod([len(v) for v in param_grid.values()])
+    log.info(f"Testing {total_combinations} parameter combinations")
+    log.info(f"⏱️  Estimated time: {total_combinations * 0.5:.0f}-{total_combinations:.0f} minutes")
+
+    # Base model
+    base_model = xgb.XGBClassifier(
+        objective='multi:softmax',
+        num_class=len(class_names),
+        random_state=cfg.seed,
+        tree_method='hist'
+    )
+
+    # Sample weights for imbalance
+    sample_weights = compute_sample_weight('balanced', y_train)
+
+    # GridSearch with CV
+    cv = StratifiedKFold(n_splits=cfg.training.cv_folds, shuffle=True, random_state=cfg.seed)
+
+    grid_search = GridSearchCV(
+        estimator=base_model,
+        param_grid=param_grid,
+        scoring='f1_macro',
+        cv=cv,
+        n_jobs=-1,
+        verbose=2
+    )
+
+    log.info("\n🚀 Starting GridSearch...")
+    grid_search.fit(X_train, y_train, sample_weight=sample_weights)
+
+    log.info("\n" + "=" * 80)
+    log.info("✅ GRIDSEARCH COMPLETE!")
+    log.info("=" * 80)
+    log.info(f"\n🏆 Best CV Macro F1: {grid_search.best_score_:.4f}")
+    log.info(f"\n🎯 Best Parameters:")
+    for param, value in grid_search.best_params_.items():
+        log.info(f"   {param}: {value}")
+
+    return grid_search.best_params_
+
+
+def create_ensemble_model(cfg, class_names):
+    """Create ensemble of multiple models"""
+    log.info("\n🎭 Creating Ensemble Model...")
+
+    import xgboost as xgb
+    import lightgbm as lgb
+    from sklearn.ensemble import VotingClassifier
+    from sklearn.svm import SVC
+
+    # XGBoost
+
+    # ========================================================================
+    # OPTIONAL: SMOTE for class imbalance
+    # ========================================================================
+    if cfg.training.get('use_smote', False):
+        X_train, y_train_encoded = apply_smote(X_train, y_train_encoded, cfg)
+
+    # ========================================================================
+    # OPTIONAL: Hyperparameter Tuning
+    # ========================================================================
+    if cfg.training.get('tune_hyperparameters', False):
+        best_params = tune_hyperparameters(X_train, y_train_encoded, cfg, class_names)
+        # Update config with best params
+        for param, value in best_params.items():
+            cfg.model.params[param] = value
+
+        # Save best params
+        with open(exp_dir / "best_hyperparameters.json", 'w') as f:
+            json.dump(best_params, f, indent=2)
+    xgb_model = xgb.XGBClassifier(
+        objective='multi:softmax',
+        num_class=len(class_names),
+    log.info(f"\nCreating {model_name} model...")
+    )
+
+    # LightGBM
+    lgb_model = lgb.LGBMClassifier(
+        objective='multiclass',
+        num_class=len(class_names),
+        max_depth=cfg.model.params.max_depth,
+        learning_rate=cfg.model.params.learning_rate,
+        n_estimators=cfg.model.params.n_estimators,
+    # ========================================================================
+    # TRAINING: Regular or Ensemble
+    # ========================================================================
+
+        random_state=cfg.seed
+
+    # SVM
+    svm_model = SVC(
+        kernel='rbf',
+        C=10.0,
+        probability=True,
+        class_weight='balanced',
+    # Check if Ensemble mode is enabled
+    if cfg.model.get('use_ensemble', False):
+        log.info("\n🎭 ENSEMBLE MODE ACTIVATED")
+        model = create_ensemble_model(cfg, class_names)
+
+        # Train ensemble
+        log.info("\nTraining ensemble model...")
+        if sample_weights is not None:
+            model.fit(X_train, y_train_encoded, sample_weight=sample_weights)
+    if cfg.model.get('use_ensemble', False):
+        # Save ensemble directly with pickle
+        with open(model_path, 'wb') as f:
+            pickle.dump(model, f)
+        log.info(f"Ensemble model saved to: {model_path}")
+    else:
+        model.save(model_path)
+        log.info(f"Model saved to: {model_path}")
+            model.fit(X_train, y_train_encoded)
+    else:
+        # Regular single model training
+        log.info("\nTraining final model on full training set...")
+        model = create_ml_model(model_name, cfg.model.params, class_names)
+
+        # Pass sample weights if available
+        if sample_weights is not None and hasattr(model, 'set_sample_weights'):
+            model.set_sample_weights(sample_weights)
+
+        model.fit(X_train, y_train_encoded, X_test, y_test_encoded)
+        ],
+        voting='soft',
+        weights=[2, 2, 1]
+    )
+
+    log.info("   ✓ XGBoost")
+    log.info("   ✓ LightGBM")
+    log.info("   ✓ SVM (RBF)")
+    log.info("   Voting: Soft (weighted probabilities)")
+
+    return ensemble
 
 
 def load_features_from_manifest(manifest_path: Path) -> tuple:
@@ -29,13 +209,16 @@ def load_features_from_manifest(manifest_path: Path) -> tuple:
 
     log.info(f"Loading features from {len(df)} samples...")
 
-    for idx, row in df.iterrows():
-        feature_path = row['feature_path']
-        label = row['label']
-
-        # Load feature vector
-        feature = np.load(feature_path)
-        features.append(feature)
+    # Feature importance (only for single models)
+    if not cfg.model.get('use_ensemble', False):
+        if hasattr(model, 'get_feature_importance'):
+            log.info("\nComputing feature importance...")
+            importance_df = model.get_feature_importance()
+            importance_path = exp_dir / "feature_importance.csv"
+            importance_df.to_csv(importance_path, index=False)
+            log.info(f"✅ Feature importance saved to {importance_path}")
+    else:
+        log.info("\n⚠️  Feature importance not available for ensemble models")
         labels.append(label)
 
     X = np.array(features)

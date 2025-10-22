@@ -1,15 +1,22 @@
-# Base Configuration for SAND Task 1
 defaults:
   - _self_
 
+# ============================================================================
+# SAND TASK 1 - UNIFIED CONFIGURATION
+# Alle Einstellungen an einem Ort!
+# ============================================================================
+
+# Command (wird über CLI gesetzt)
 command: null
 
 # Experiment
 seed: 42
-experiment_name: "sand_task1_baseline"
+experiment_name: "sand_task1"
 output_dir: "runs"
 
-# Data
+# ============================================================================
+# DATA
+# ============================================================================
 data:
   root_dir: "data/task1/training"
   manifest_dir: "data/manifests"
@@ -25,15 +32,17 @@ data:
     - rhythmPA
     - rhythmTA
 
-# Labels
+# ============================================================================
+# LABELS
+# ============================================================================
 labels:
   num_classes: 5
   class_names:
-    - "ALS_Severe (1)"        # ALSFRS-R Speech = 1
-    - "ALS_Moderate (2)"      # ALSFRS-R Speech = 2
-    - "ALS_Mild (3)"          # ALSFRS-R Speech = 3
-    - "ALS_None (4)"          # ALSFRS-R Speech = 4 (Non-Dysarthric)
-    - "Healthy (5)"           # Healthy Controls
+    - "ALS_Severe (1)"
+    - "ALS_Moderate (2)"
+    - "ALS_Mild (3)"
+    - "ALS_None (4)"
+    - "Healthy (5)"
   label_mapping:
     1: "ALS_Severe (1)"
     2: "ALS_Moderate (2)"
@@ -41,49 +50,413 @@ labels:
     4: "ALS_None (4)"
     5: "Healthy (5)"
 
-# Split
+# ============================================================================
+# SPLIT
+# ============================================================================
 split:
   test_size: 0.2
   stratify: true
   min_samples_per_subject: 1
 
-# Feature Extraction (defaults)
+# ============================================================================
+# FEATURES
+# ============================================================================
 features:
-  type: "mfcc"
+  type: "mfcc"  # Options: mfcc, egemaps, mfcc+egemaps
+
   mfcc:
-    n_mfcc: 13
+    n_mfcc: 20              # Anzahl MFCC Koeffizienten
     n_fft: 2048
-    hop_length: 512
-    n_mels: 40
+    hop_length: 256
+    n_mels: 80
     include_deltas: true
     include_delta_deltas: true
-    statistics:
+    statistics:             # Statistiken pro Feature
       - mean
       - std
+      - min
+      - max
+      - median
+      - q25
+      - q75
+      - iqr
+      - skewness
+      - kurtosis
+      - rms
+      - zcr
+
   egemaps:
     feature_set: "eGeMAPSv02"
     feature_level: "functionals"
 
-# Model (defaults)
+# ============================================================================
+# MODEL
+# ============================================================================
 model:
-  name: "xgboost"
+  name: "xgboost"  # Options: xgboost, lightgbm
+  use_ensemble: false  # Kombiniert XGBoost + LightGBM + SVM
+
   params:
     objective: "multi:softmax"
     eval_metric: "mlogloss"
-    max_depth: 6
-    learning_rate: 0.1
-    n_estimators: 100
+    max_depth: 10
+    learning_rate: 0.01
+    n_estimators: 1000
+    subsample: 0.8
+    colsample_bytree: 0.7
+    min_child_weight: 1
+    gamma: 0.2
+    reg_alpha: 0.1
+    reg_lambda: 1.0
     random_state: 42
+    tree_method: "hist"
+    device: "cpu"
 
-# Training
+# ============================================================================
+# TRAINING
+# ============================================================================
 training:
-  cv_folds: 0
-  early_stopping_rounds: 10
+  cv_folds: 5
+  early_stopping_rounds: 50
+  use_class_weights: true        # WICHTIG für Imbalance!
+  tune_hyperparameters: false    # GridSearch (1-2 Stunden)
 
-# Device
+  # SMOTE für Imbalance (experimentell)
+  use_smote: false
+  smote_k_neighbors: 5
+
+  # Hyperparameter-Tuning Grid
+  tuning_grid:
+    max_depth: [8, 10, 12]
+    learning_rate: [0.01, 0.03, 0.05]
+    n_estimators: [500, 1000, 1500]
+    min_child_weight: [1, 3, 5]
+    gamma: [0.1, 0.2, 0.3]
+
+# ============================================================================
+# DEVICE & LOGGING
+# ============================================================================
 device: "mps"  # For M2 Max; use "cpu" as fallback
-
-# Logging
 verbose: true
 save_predictions: true
 save_metrics: true
+save_confusion_matrix: true
+save_feature_importance: true
+# 🚀 SAND Task 1 - Audio Classification Pipeline
+
+Klassifizierung von Sprachaufnahmen von ALS-Patienten in 5 Schweregrade.
+
+---
+
+## 📋 **QUICK START**
+
+```bash
+# 1. Environment aktivieren
+source venv/bin/activate
+
+# 2. Daten vorbereiten (einmalig)
+python -m sandcli.main command=prep
+python -m sandcli.main command=split
+
+# 3. Features extrahieren
+python -m sandcli.main command=featurize
+
+# 4. Modell trainieren
+python -m sandcli.main command=train
+
+# 5. (Optional) Hyperparameter-Tuning
+python -m sandcli.main command=train training.tune_hyperparameters=true
+
+# 6. (Optional) Ensemble
+python -m sandcli.main command=train model.use_ensemble=true
+```
+
+---
+
+## 🎯 **PROJEKT-STRUKTUR**
+
+```
+├── README.md                 # Diese Datei
+├── requirements.txt          # Python Dependencies
+├── conf/
+│   └── config.yaml          # EINZIGE Config-Datei (wichtig!)
+├── data/
+│   ├── task1/training/      # Audio-Dateien
+│   └── manifests/           # Train/Test Splits
+├── features/mfcc/           # Extrahierte Features
+├── models/                  # Model-Definitionen
+├── sandcli/                 # Pipeline-Code
+│   ├── main.py             # CLI Entry Point
+│   ├── prep.py             # Schritt 1: Data Preparation
+│   ├── split.py            # Schritt 2: Train/Test Split
+│   ├── featurize.py        # Schritt 3: Feature Extraction
+│   └── train.py            # Schritt 4: Training (zentral!)
+└── runs/                    # Experiment Results
+```
+
+---
+
+## 📊 **DATEN-ÜBERSICHT**
+
+### **Klassen & Samples:**
+```
+Healthy (5):      680 samples (39%)
+ALS_None (4):     488 samples (28%)
+ALS_Mild (3):     360 samples (21%)
+ALS_Moderate (2): 168 samples (10%)
+ALS_Severe (1):    40 samples (2%)  ← PROBLEM: Sehr wenig!
+-----------------------------------
+TOTAL:           1736 samples
+
+Imbalance Ratio: 17:1 (Healthy vs ALS_Severe)
+```
+
+**⚠️ WICHTIG:** Das extreme Imbalance (17:1) macht ALS_Severe fast unmöglich zu lernen!
+
+---
+
+## 🔍 **PIPELINE SCHRITTE (DETAILS)**
+
+### **Schritt 1: Data Preparation**
+```bash
+python -m sandcli.main command=prep
+```
+- Scannt alle WAV-Dateien in `data/task1/training/`
+- Extrahiert Metadaten (Subject ID, Task, Dauer)
+- Lädt Labels aus Excel (`sand_task_1.xlsx`)
+- Erstellt `data/manifests/full_manifest.csv`
+
+**Output:** ~2176 Audio-Dateien gefunden
+
+---
+
+### **Schritt 2: Train/Test Split**
+```bash
+python -m sandcli.main command=split
+```
+- **Subject-wise Split** (kein Subject in Train UND Test)
+- 80% Train, 20% Test
+- Stratified by Label (versucht Balance zu halten)
+
+**Output:**
+- `train_manifest.csv`: 1736 samples
+- `test_manifest.csv`: 440 samples
+
+---
+
+### **Schritt 3: Feature Extraction**
+```bash
+python -m sandcli.main command=featurize
+```
+
+**Standard Features (MFCC):**
+- 20 MFCCs (statt 13)
+- 80 Mel-Bins
+- Deltas + Delta-Deltas
+- 12 Statistiken: mean, std, min, max, median, q25, q75, IQR, skewness, kurtosis, RMS, ZCR
+
+**Resultat:** ~720 Features pro Audio-Datei
+
+**Alternative Features:**
+```bash
+# eGeMAPS (akustische Features)
+python -m sandcli.main command=featurize features.type=egemaps
+
+# Fusion (MFCC + eGeMAPS)
+python -m sandcli.main command=featurize features.type=mfcc+egemaps
+```
+
+---
+
+### **Schritt 4: Training**
+```bash
+python -m sandcli.main command=train
+```
+
+**Standard Training:**
+- Model: XGBoost
+- Class Weighting: Automatisch (handled Imbalance)
+- Cross-Validation: 5-Fold
+- Early Stopping: 50 rounds
+
+**Mit Hyperparameter-Tuning:**
+```bash
+python -m sandcli.main command=train training.tune_hyperparameters=true
+```
+- GridSearch über wichtige Parameter
+- Optimiert für Macro F1
+- Dauer: ~1-2 Stunden
+
+**Mit Ensemble:**
+```bash
+python -m sandcli.main command=train model.use_ensemble=true
+```
+- Kombiniert XGBoost + LightGBM + SVM
+- Soft Voting (nutzt Wahrscheinlichkeiten)
+- Bessere Generalisierung
+
+---
+
+## 📈 **ERWARTETE PERFORMANCE**
+
+### **Baseline (MFCC + XGBoost):**
+```
+Macro F1:  0.22 (sehr schlecht!)
+Accuracy:  0.33
+Problem:   ALS_Severe wird nicht erkannt (0.00 F1)
+```
+
+### **Nach Optimierungen:**
+```
+Macro F1:  0.45-0.55 (mit besseren Features + Class Weighting)
+Accuracy:  0.50-0.60
+Macro F1:  0.55-0.65 (+ Hyperparameter Tuning)
+Macro F1:  0.60-0.70 (+ Ensemble)
+```
+
+**Wichtig:** ALS_Severe (nur 40 Samples!) wird immer schwierig bleiben.
+
+---
+
+## 🔧 **KONFIGURATION**
+
+**Alles wird in `conf/config.yaml` gesteuert:**
+
+```yaml
+# Features anpassen
+features:
+  type: mfcc  # oder: egemaps, mfcc+egemaps
+  mfcc:
+    n_mfcc: 20
+    statistics: [mean, std, median, ...]
+
+# Model anpassen
+model:
+  name: xgboost  # oder: lightgbm
+  params:
+    max_depth: 10
+    learning_rate: 0.01
+    n_estimators: 1000
+
+# Training anpassen
+training:
+  cv_folds: 5
+  use_class_weights: true  # Wichtig für Imbalance!
+  tune_hyperparameters: false
+  use_ensemble: false
+```
+
+**Parameter überschreiben:**
+```bash
+python -m sandcli.main command=train \
+  model.params.max_depth=12 \
+  training.cv_folds=10
+```
+
+---
+
+## 🐛 **TROUBLESHOOTING**
+
+### **Problem: Macro F1 steigt nicht (bleibt bei ~0.22)**
+
+**Ursachen:**
+1. ✅ **Features nicht neu extrahiert** → Lösung: Alte Features löschen
+2. ✅ **Extremes Imbalance** → Lösung: SMOTE, Oversampling
+3. ✅ **Zu wenig ALS_Severe Samples** → Lösung: Data Augmentation
+
+**Sofort-Fix:**
+```bash
+# Lösche alte Features
+rm -rf features/mfcc/train/*.npy features/mfcc/test/*.npy
+
+# Neu extrahieren
+python -m sandcli.main command=featurize
+
+# Neu trainieren
+python -m sandcli.main command=train
+```
+
+### **Problem: ALS_Severe F1 = 0.00**
+
+Das ist **normal** bei nur 40 Samples vs. 680 Healthy!
+
+**Lösungen:**
+1. **SMOTE** (Synthetic Minority Oversampling)
+2. **Focal Loss** (fokussiert auf schwere Klassen)
+3. **Mehr Daten sammeln** (ideal)
+
+---
+
+## 📁 **RESULTS**
+
+Nach jedem Training:
+```
+runs/<experiment_name>_<timestamp>/
+├── config.yaml              # Verwendete Config
+├── model.pkl                # Trainiertes Modell
+├── label_encoder.pkl        # Label Mapping
+├── metrics.json             # Alle Metriken
+├── confusion_matrix.png     # Visualisierung
+├── predictions.csv          # Test-Set Predictions
+├── feature_importance.csv   # Feature Wichtigkeit
+└── cv_results.json          # Cross-Validation Results
+```
+
+**Ergebnisse anschauen:**
+```bash
+# Neuestes Experiment
+ls -t runs/*/metrics.json | head -1 | xargs cat | grep macro_f1
+
+# Confusion Matrix öffnen
+open runs/$(ls -t runs/ | head -1)/confusion_matrix.png
+```
+
+---
+
+## 🎯 **NÄCHSTE SCHRITTE**
+
+### **Wenn Macro F1 < 0.50:**
+1. Überprüfe ob Features korrekt extrahiert wurden
+2. Aktiviere Hyperparameter-Tuning
+3. Versuche Ensemble
+
+### **Wenn Macro F1 0.50-0.60:**
+1. Versuche SMOTE für Imbalance
+2. Teste eGeMAPS Features
+3. Teste Feature Fusion (MFCC+eGeMAPS)
+
+### **Wenn Macro F1 > 0.60:**
+1. 🎉 Gut! Optimiere weiter mit:
+   - Deep Learning (Wav2Vec2)
+   - Data Augmentation
+   - Model Stacking
+
+---
+
+## ❓ **FAQ**
+
+**Q: Warum so viele Config-Dateien?**
+A: Nur `config.yaml` wird gebraucht! Die anderen sind veraltet.
+
+**Q: Brauche ich die Shell-Skripte?**
+A: NEIN! Alles läuft über `python -m sandcli.main command=...`
+
+**Q: Warum ist ALS_Severe F1 = 0?**
+A: Nur 40 Samples vs. 680 Healthy. Das ist extremes Imbalance.
+
+**Q: Wie kann ich das verbessern?**
+A: SMOTE, Focal Loss, oder mehr Daten sammeln.
+
+---
+
+## 📞 **SUPPORT**
+
+Bei Problemen:
+1. Prüfe Logs in `outputs/`
+2. Validiere Config: `python -m sandcli.main --cfg job`
+3. Teste Features: Siehe Troubleshooting
+
+---
+
+**Viel Erfolg! 🚀**
+
