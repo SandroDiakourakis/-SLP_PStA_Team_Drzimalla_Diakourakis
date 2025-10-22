@@ -72,10 +72,26 @@ class MFCCExtractor:
                 statistics.append(np.min(features, axis=1))
             elif stat_name == 'max':
                 statistics.append(np.max(features, axis=1))
+            elif stat_name == 'median':
+                statistics.append(np.median(features, axis=1))
+            elif stat_name == 'q25':
+                statistics.append(np.percentile(features, 25, axis=1))
+            elif stat_name == 'q75':
+                statistics.append(np.percentile(features, 75, axis=1))
+            elif stat_name == 'iqr':
+                q75 = np.percentile(features, 75, axis=1)
+                q25 = np.percentile(features, 25, axis=1)
+                statistics.append(q75 - q25)
             elif stat_name == 'skewness':
                 statistics.append(stats.skew(features, axis=1))
             elif stat_name == 'kurtosis':
                 statistics.append(stats.kurtosis(features, axis=1))
+            elif stat_name == 'rms':
+                statistics.append(np.sqrt(np.mean(features**2, axis=1)))
+            elif stat_name == 'zcr':
+                # Zero crossing rate per feature
+                zcr = np.sum(np.diff(np.sign(features), axis=1) != 0, axis=1) / features.shape[1]
+                statistics.append(zcr)
 
         return np.concatenate(statistics)
 

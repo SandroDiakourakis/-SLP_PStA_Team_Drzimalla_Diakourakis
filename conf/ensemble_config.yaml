@@ -1,0 +1,60 @@
+defaults:
+  - config
+
+experiment_name: "ensemble_voting"
+
+# Ensemble-Strategie
+ensemble:
+  strategy: "voting"  # oder "stacking", "averaging"
+  models:
+    - name: "xgboost"
+      weight: 1.0
+      params:
+        objective: "multi:softmax"
+        max_depth: 10
+        learning_rate: 0.01
+        n_estimators: 1000
+        subsample: 0.8
+        colsample_bytree: 0.7
+
+    - name: "lightgbm"
+      weight: 1.0
+      params:
+        objective: "multiclass"
+        num_class: 5
+        max_depth: 10
+        learning_rate: 0.01
+        n_estimators: 1000
+        subsample: 0.8
+        colsample_bytree: 0.7
+
+# Features (verwende die besten aus Stufe 1)
+features:
+  type: "mfcc"
+  mfcc:
+    n_mfcc: 20
+    n_fft: 2048
+    hop_length: 256
+    n_mels: 80
+    include_deltas: true
+    include_delta_deltas: true
+    statistics:
+      - mean
+      - std
+      - min
+      - max
+      - median
+      - q25
+      - q75
+      - iqr
+      - skewness
+      - kurtosis
+      - rms
+      - zcr
+
+# Training mit Class Weighting
+training:
+  cv_folds: 5
+  use_class_weights: true
+  early_stopping_rounds: 50
+

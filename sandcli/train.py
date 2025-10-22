@@ -146,9 +146,23 @@ def run(cfg: DictConfig) -> None:
         with open(exp_dir / "cv_results.json", 'w') as f:
             json.dump(cv_results, f, indent=2)
 
+    # Compute sample weights for imbalanced classes
+    from sklearn.utils.class_weight import compute_sample_weight
+    if cfg.training.get('use_class_weights', False):
+        sample_weights = compute_sample_weight('balanced', y_train_encoded)
+        log.info(f"\n⚖️  Using class weights for imbalanced data")
+        log.info(f"   Weight range: {sample_weights.min():.2f} - {sample_weights.max():.2f}")
+    else:
+        sample_weights = None
+
     # Train final model on full training set
     log.info("\nTraining final model on full training set...")
     model = create_ml_model(model_name, cfg.model.params, class_names)
+
+    # Pass sample weights if available
+    if sample_weights is not None and hasattr(model, 'set_sample_weights'):
+        model.set_sample_weights(sample_weights)
+
     model.fit(X_train, y_train_encoded, X_test, y_test_encoded)
 
     # Save model
