@@ -21,6 +21,7 @@ import numpy as np
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import logging
+import pandas as pd
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -595,55 +596,117 @@ class LateFusionPipeline:
 # Example Usage
 # ============================================================================
 
+import pandas as pd  # Füge am Anfang hinzu
+
 def create_example_dataset() -> List[AudioSample]:
     """
-    Create example dataset structure.
+    Create dataset from your custom structure.
 
     Expected directory structure:
-        data/
-            individual_1/
-                a.wav
-                e.wav
-                i.wav
-                o.wav
-                u.wav
-                pa.wav
-                ta.wav
-                ka.wav
-            individual_2/
+        data/task1/training/
+            phonationA/
+                ID000_phonationA.wav
+                ID001_phonationA.wav
                 ...
+            phonationE/
+                ID000_phonationE.wav
+                ...
+            ... (insgesamt 8 Ordner)
+    
+    Labels werden aus der Excel-Datei geladen.
     """
-    # This is a placeholder - replace with your actual data loading
     samples = []
-
-    # Example: Load from directory structure
-    data_dir = Path("data")
-    if not data_dir.exists():
-        logger.warning("Data directory not found. This is example code.")
+    
+    # Laden der Label aus Excel
+    excel_path = Path("/Users/fabian.drzimalla/Master_Projects/SLP_PStA_Team_Drzimalla_Diakourakis/data/task1/sand_task_1.xlsx")
+    
+    if not excel_path.exists():
+        logger.error(f"Excel file not found: {excel_path}")
         return []
-
-    for individual_dir in data_dir.iterdir():
-        if not individual_dir.is_dir():
+    
+    # Lese Excel-Datei
+    try:
+        df_labels = pd.read_excel(excel_path, sheet_name='SAND - TRAINING set - Task 1')
+        logger.info(f"Loaded labels for {len(df_labels)} individuals")
+    except Exception as e:
+        logger.error(f"Error loading Excel file: {e}")
+        return []
+    
+    # Erstelle Dictionary für schnelle Label-Abfrage: ID -> Class
+    id_to_label = dict(zip(df_labels['ID'], df_labels['Class']))
+    
+    # Definiere die Task-Ordner und deren erwartete Audio-Dateien
+    task_dir = Path("data/task1/training")
+    
+    if not task_dir.exists():
+        logger.error(f"Task directory not found: {task_dir}")
+        return []
+    
+    # Ordner-Namen müssen mit Audio-Datei-Namen übereinstimmen
+    # Z.B. Ordner "phonationA" → Datei "ID000_phonationA.wav"
+    audio_folders = {
+        "phonationA": "phonationA",
+        "phonationE": "phonationE",
+        "phonationI": "phonationI",
+        "phonationO": "phonationO",
+        "phonationU": "phonationU",
+        "rythmKA": "rythmKA",
+        "rythmPA": "rythmPA",
+        "rythmTA": "rythmTA",
+    }
+    
+    # Sammle alle eindeutigen IDs aus den Dateien
+    all_ids = set()
+    
+    for folder_name in audio_folders.keys():
+        folder_path = task_dir / folder_name
+        if folder_path.exists():
+            for wav_file in folder_path.glob("*.wav"):
+                # Extrahiere ID aus Dateinamen (z.B. "ID000_phonationA.wav" → "ID000")
+                file_stem = wav_file.stem  # "ID000_phonationA"
+                id_part = file_stem.split("_")[0]  # "ID000"
+                all_ids.add(id_part)
+    
+    logger.info(f"Found {len(all_ids)} individuals in audio files")
+    
+    # Für jeden Individuum: Sammle alle 8 Audio-Dateien
+    for individual_id in sorted(all_ids):
+        # Prüfe ob Label in Excel existiert
+        if individual_id not in id_to_label:
+            logger.warning(f"No label found for {individual_id}, skipping...")
             continue
-
-        # Expected file names
-        file_names = ["a.wav", "e.wav", "i.wav", "o.wav", "u.wav", "pa.wav", "ta.wav", "ka.wav"]
-        file_paths = [individual_dir / fname for fname in file_names]
-
-        # Check if all files exist
-        if all(fp.exists() for fp in file_paths):
-            # Extract label from directory name (customize as needed)
-            label = 1 if "positive" in individual_dir.name else 0
-
+        
+        file_paths = []
+        
+        # Sammle alle 8 Audio-Dateien für diesen Individuum
+        for folder_name, file_pattern in audio_folders.items():
+            folder_path = task_dir / folder_name
+            
+            # Suche Datei mit Pattern: ID000_phonationA.wav
+            audio_file = folder_path / f"{individual_id}_{file_pattern}.wav"
+            
+            if audio_file.exists():
+                file_paths.append(audio_file)
+            else:
+                logger.warning(f"Missing audio file: {audio_file}")
+                break  # Falls eine Datei fehlt, überspringe diesen Individuum
+        
+        # Nur hinzufügen, wenn alle 8 Dateien vorhanden sind
+        if len(file_paths) == 8:
+            label = id_to_label[individual_id]
+            
             sample = AudioSample(
                 file_paths=file_paths,
                 label=label,
-                individual_id=individual_dir.name
+                individual_id=individual_id
             )
             samples.append(sample)
-
+            logger.info(f"Added {individual_id}: label={label}, files={len(file_paths)}")
+        else:
+            logger.warning(f"Incomplete data for {individual_id}: only {len(file_paths)}/8 files")
+    
+    logger.info(f"Total samples created: {len(samples)}")
     return samples
-
 
 def main():
     """Example usage of the late fusion pipeline."""
@@ -676,11 +739,15 @@ def main():
     if len(samples) == 0:
         logger.warning("No samples found. Please prepare your data.")
         logger.info("\nExpected directory structure:")
-        logger.info("data/")
-        logger.info("  individual_1/")
-        logger.info("    a.wav, e.wav, i.wav, o.wav, u.wav, pa.wav, ta.wav, ka.wav")
-        logger.info("  individual_2/")
-        logger.info("    ...")
+        logger.info("data/task1/training/")
+        logger.info("    phonationA/")
+        logger.info("        ID000_phonationA.wav")
+        logger.info("        ID001_phonationA.wav")
+        logger.info("        ...")
+        logger.info("    phonationE/")
+        logger.info("        ID000_phonationE.wav")
+        logger.info("        ...")
+        logger.info("    ... (insgesamt 8 Ordner)")
         return
 
     # Split into train/val
@@ -726,7 +793,7 @@ def main():
         weight_decay=1e-4
     )
     logger.info("Training completed.")
-    
+
     # 5. Save model
     logger.info("Saving model...")
     pipeline.save("late_fusion_model.pth")
