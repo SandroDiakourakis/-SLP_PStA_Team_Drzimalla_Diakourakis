@@ -593,47 +593,20 @@ class LateFusionPipeline:
 
 
 # ============================================================================
-# Example Usage
+# Create Train- and Val-Dataset from Excel
 # ============================================================================
-
-import pandas as pd  # Füge am Anfang hinzu
-
-def create_example_dataset() -> List[AudioSample]:
+def create_dataset_from_excel(sheet_name: str, excel_path: Path) -> List[AudioSample]:
     """
-    Create dataset from your custom structure.
-
-    Expected directory structure:
-        data/task1/training/
-            phonationA/
-                ID000_phonationA.wav
-                ID001_phonationA.wav
-                ...
-            phonationE/
-                ID000_phonationE.wav
-                ...
-            ... (insgesamt 8 Ordner)
+    Create dataset from Excel sheet specification.
     
-    Labels werden aus der Excel-Datei geladen.
+    Args:
+        sheet_name: Name of the Excel sheet (e.g., 'SAND - TRAINING set - Task 1')
+        excel_path: Path to the Excel file
+    
+    Returns:
+        List of AudioSample objects
     """
     samples = []
-    
-    # Laden der Label aus Excel
-    excel_path = Path("/Users/fabian.drzimalla/Master_Projects/SLP_PStA_Team_Drzimalla_Diakourakis/data/task1/sand_task_1.xlsx")
-    
-    if not excel_path.exists():
-        logger.error(f"Excel file not found: {excel_path}")
-        return []
-    
-    # Lese Excel-Datei
-    try:
-        df_labels = pd.read_excel(excel_path, sheet_name='SAND - TRAINING set - Task 1')
-        logger.info(f"Loaded labels for {len(df_labels)} individuals")
-    except Exception as e:
-        logger.error(f"Error loading Excel file: {e}")
-        return []
-    
-    # Erstelle Dictionary für schnelle Label-Abfrage: ID -> Class
-    id_to_label = dict(zip(df_labels['ID'], df_labels['Class']))
     
     # Definiere die Task-Ordner und deren erwartete Audio-Dateien
     task_dir = Path("data/task1/training")
@@ -643,7 +616,6 @@ def create_example_dataset() -> List[AudioSample]:
         return []
     
     # Ordner-Namen müssen mit Audio-Datei-Namen übereinstimmen
-    # Z.B. Ordner "phonationA" → Datei "ID000_phonationA.wav"
     audio_folders = {
         "phonationA": "phonationA",
         "phonationE": "phonationE",
@@ -655,27 +627,19 @@ def create_example_dataset() -> List[AudioSample]:
         "rythmTA": "rythmTA",
     }
     
-    # Sammle alle eindeutigen IDs aus den Dateien
-    all_ids = set()
+    # Lese Excel-Sheet
+    try:
+        df_labels = pd.read_excel(excel_path, sheet_name=sheet_name)
+        logger.info(f"Loaded {len(df_labels)} individuals from sheet '{sheet_name}'")
+    except Exception as e:
+        logger.error(f"Error loading Excel sheet '{sheet_name}': {e}")
+        return []
     
-    for folder_name in audio_folders.keys():
-        folder_path = task_dir / folder_name
-        if folder_path.exists():
-            for wav_file in folder_path.glob("*.wav"):
-                # Extrahiere ID aus Dateinamen (z.B. "ID000_phonationA.wav" → "ID000")
-                file_stem = wav_file.stem  # "ID000_phonationA"
-                id_part = file_stem.split("_")[0]  # "ID000"
-                all_ids.add(id_part)
+    # Erstelle Dictionary für schnelle Label-Abfrage: ID -> Class
+    id_to_label = dict(zip(df_labels['ID'], df_labels['Class']))
     
-    logger.info(f"Found {len(all_ids)} individuals in audio files")
-    
-    # Für jeden Individuum: Sammle alle 8 Audio-Dateien
-    for individual_id in sorted(all_ids):
-        # Prüfe ob Label in Excel existiert
-        if individual_id not in id_to_label:
-            logger.warning(f"No label found for {individual_id}, skipping...")
-            continue
-        
+    # Für jeden Individuum aus dem Sheet: Sammle alle 8 Audio-Dateien
+    for individual_id in df_labels['ID']:
         file_paths = []
         
         # Sammle alle 8 Audio-Dateien für diesen Individuum
@@ -703,10 +667,45 @@ def create_example_dataset() -> List[AudioSample]:
             samples.append(sample)
             logger.info(f"Added {individual_id}: label={label}, files={len(file_paths)}")
         else:
-            logger.warning(f"Incomplete data for {individual_id}: only {len(file_paths)}/8 files")
+            logger.warning(f"Incomplete data for {individual_id}: only {len(file_paths)}/8 files found")
     
-    logger.info(f"Total samples created: {len(samples)}")
+    logger.info(f"Total samples from '{sheet_name}': {len(samples)}")
     return samples
+
+
+def load_train_val_datasets() -> Tuple[List[AudioSample], List[AudioSample]]:
+    """
+    Load separate training and validation datasets from Excel sheets.
+    
+    Returns:
+        (train_samples, val_samples)
+    """
+    excel_path = Path("/Users/fabian.drzimalla/Master_Projects/SLP_PStA_Team_Drzimalla_Diakourakis/data/task1/sand_task_1.xlsx")
+    
+    if not excel_path.exists():
+        logger.error(f"Excel file not found: {excel_path}")
+        return [], []
+    
+    # Lade Training-Set
+    train_samples = create_dataset_from_excel(
+        sheet_name='Training Baseline - Task 1',
+        excel_path=excel_path
+    )
+    
+    # Lade Validation-Set
+    val_samples = create_dataset_from_excel(
+        sheet_name='Validation Baseline - Task 1',
+        excel_path=excel_path
+    )
+    
+    logger.info(f"\n{'='*60}")
+    logger.info(f"Final Dataset Summary:")
+    logger.info(f"  Training samples: {len(train_samples)}")
+    logger.info(f"  Validation samples: {len(val_samples)}")
+    logger.info(f"  Total samples: {len(train_samples) + len(val_samples)}")
+    logger.info(f"{'='*60}\n")
+    
+    return train_samples, val_samples
 
 def main():
     """Example usage of the late fusion pipeline."""
@@ -727,37 +726,37 @@ def main():
         pooling="mean",
         device=DEVICE
     )
-    # Alternative: HuBERTExtractor(...) or WavLMExtractor(...)
+    # feature_extractor = HuBERTExtractor(
+    #     model_name="facebook/hubert-large-ll60k",
+    #     pooling="mean",
+    #     device=DEVICE
+    # )
+    # feature_extractor = WavLMExtractor(
+    #     model_name="microsoft/wavlm-large",
+    #     pooling="mean",
+    #     device=DEVICE
+    # )
 
     feature_dim = feature_extractor.get_feature_dim()
     logger.info(f"Feature dimension: {feature_dim}")
 
-    # 2. Create dataset
-    logger.info("Loading dataset...")
-    samples = create_example_dataset()
+    # 2. Load dataset with predefined train/val split from Excel
+    logger.info("Loading dataset from Excel sheets...")
+    train_samples, val_samples = load_train_val_datasets()
 
-    if len(samples) == 0:
-        logger.warning("No samples found. Please prepare your data.")
-        logger.info("\nExpected directory structure:")
-        logger.info("data/task1/training/")
-        logger.info("    phonationA/")
-        logger.info("        ID000_phonationA.wav")
-        logger.info("        ID001_phonationA.wav")
-        logger.info("        ...")
-        logger.info("    phonationE/")
-        logger.info("        ID000_phonationE.wav")
-        logger.info("        ...")
-        logger.info("    ... (insgesamt 8 Ordner)")
+    if len(train_samples) == 0 or len(val_samples) == 0:
+        logger.error("Failed to load train or validation samples!")
+        logger.info("\nExpected Excel structure:")
+        logger.info("  Sheet 1: 'Training Baseline - Task 1'")
+        logger.info("    Columns: ID, Age, Sex, Class")
+        logger.info("  Sheet 2: 'Validation Baseline - Task 1'")
+        logger.info("    Columns: ID, Age, Sex, Class")
         return
-
-    # Split into train/val
-    split_idx = int(0.8 * len(samples))
-    train_samples = samples[:split_idx]
-    val_samples = samples[split_idx:]
 
     logger.info(f"Train samples: {len(train_samples)}, Val samples: {len(val_samples)}")
 
-    # Create datasets and dataloaders
+    # 3. Create datasets and dataloaders
+    logger.info("Creating datasets and dataloaders...")
     train_dataset = MultiFileAudioDataset(train_samples, feature_extractor)
     val_dataset = MultiFileAudioDataset(val_samples, feature_extractor)
 
@@ -766,7 +765,7 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
                            shuffle=False, collate_fn=collate_fn)
 
-    # 3. Create model
+    # 4. Create model
     logger.info("Creating model...")
     model = LateFusionClassifier(
         input_dim=feature_dim,
@@ -781,7 +780,7 @@ def main():
 
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    # 4. Create pipeline and train
+    # 5. Create pipeline and train
     pipeline = LateFusionPipeline(feature_extractor, model, device=DEVICE)
 
     logger.info("Starting training...")
@@ -794,11 +793,11 @@ def main():
     )
     logger.info("Training completed.")
 
-    # 5. Save model
+    # 6. Save model
     logger.info("Saving model...")
     pipeline.save("late_fusion_model.pth")
 
-    # 6. Example inference
+    # 7. Example inference
     if len(val_samples) > 0:
         test_sample = val_samples[0]
         prediction = pipeline.predict(test_sample.file_paths)
