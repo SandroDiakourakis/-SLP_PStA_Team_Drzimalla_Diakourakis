@@ -22,6 +22,9 @@ from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import logging
 import pandas as pd
+from sklearn.metrics import classification_report, confusion_matrix, f1_score, precision_score, recall_score, accuracy_score, cohen_kappa_score, balanced_accuracy_score
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -571,6 +574,25 @@ class LateFusionPipeline:
             pred = logits.argmax(dim=1).item()
 
         return pred
+    
+    def predict_batch(self, data_loader: DataLoader) -> Tuple[np.ndarray, np.ndarray]:
+        """Get predictions for entire dataset (for evaluation)."""
+        self.model.eval()
+        all_preds = []
+        all_labels = []
+
+        with torch.no_grad():
+            for file_features, labels in data_loader:
+                file_features = [feat.to(self.device) for feat in file_features]
+                labels = labels.to(self.device)
+
+                logits = self.model(file_features)
+                preds = logits.argmax(dim=1)
+
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+
+        return np.array(all_preds), np.array(all_labels)
 
     def save(self, path: Union[str, Path]):
         """Save model checkpoint."""
@@ -591,6 +613,249 @@ class LateFusionPipeline:
         self.model.load_state_dict(checkpoint['model_state_dict'])
         logger.info(f"Model loaded from {path}")
 
+    def plot_training_history(self):
+        """Plot training and validation metrics over epochs."""
+        if not self.train_history['epoch']:
+            logger.warning("No training history available. Train the model first.")
+            return
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+        # Loss plot
+        ax1.plot(self.train_history['epoch'], self.train_history['train_loss'], 'b-o', label='Train Loss')
+        ax1.plot(self.train_history['epoch'], self.train_history['val_loss'], 'r-o', label='Val Loss')
+        ax1.set_xlabel('Epoch')
+        ax1.set_ylabel('Loss')
+        ax1.set_title('Training and Validation Loss')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # Accuracy plot
+        ax2.plot(self.train_history['epoch'], self.train_history['train_acc'], 'b-o', label='Train Acc')
+        ax2.plot(self.train_history['epoch'], self.train_history['val_acc'], 'r-o', label='Val Acc')
+        ax2.set_xlabel('Epoch')
+        ax2.set_ylabel('Accuracy')
+        ax2.set_title('Training and Validation Accuracy')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.show()
+
+    def plot_confusion_matrix(self, y_true: np.ndarray, y_pred: np.ndarray, 
+                             class_names: Optional[List[str]] = None):
+        """Plot confusion matrix."""
+        cm = confusion_matrix(y_true, y_pred)
+
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                    xticklabels=class_names, yticklabels=class_names)
+        plt.title('Confusion Matrix')
+        plt.ylabel('True Label')
+        plt.xlabel('Predicted Label')
+        plt.tight_layout()
+        plt.show()
+
+    def print_evaluation_report(self, y_true: np.ndarray, y_pred: np.ndarray,
+                               class_names: Optional[List[str]] = None,
+                               train_samples: Optional[List] = None,
+                               val_samples: Optional[List] = None):
+        """Print detailed evaluation metrics with model configuration."""
+        
+        print("\n" + "="*80)
+        print("📊 LATE FUSION PIPELINE - DETAILED EVALUATION REPORT")
+        print("="*80)
+
+        # =====================================================================
+        # 1. MODEL CONFIGURATION
+        # =====================================================================
+        print("\n🔧 MODEL CONFIGURATION:")
+        print("-" * 80)
+        
+        # Feature Extractor
+        extractor_name = self.feature_extractor.__class__.__name__
+        print(f"{'Feature Extractor':<30} {extractor_name}")
+        
+        # Fusion Type
+        fusion_type = self.model.fusion_type
+        print(f"{'Fusion Type':<30} {fusion_type.upper()}")
+        
+        # Number of files
+        num_files = self.model.num_files
+        print(f"{'Audio Files per Individual':<30} {num_files}")
+        
+        # Number of classes
+        num_classes = self.model.num_classes
+        print(f"{'Number of Classes':<30} {num_classes}")
+        
+        # Model parameters
+        total_params = sum(p.numel() for p in self.model.parameters())
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        print(f"{'Total Parameters':<30} {total_params:,}")
+        print(f"{'Trainable Parameters':<30} {trainable_params:,}")
+        
+        # Shared file processor
+        shared = self.model.shared_file_processor
+        print(f"{'Shared File Processor':<30} {'Yes' if shared else 'No'}")
+        
+        # Device
+        device = self.device
+        print(f"{'Device':<30} {device.upper()}")
+
+        # =====================================================================
+        # 2. DATASET INFORMATION
+        # =====================================================================
+        print("\n📁 DATASET INFORMATION:")
+        print("-" * 80)
+        
+        total_val_samples = len(y_true)
+        print(f"{'Validation Samples':<30} {total_val_samples}")
+        
+        # Class distribution in validation set
+        unique, counts = np.unique(y_true, return_counts=True)
+        print(f"\n{'Class Distribution (Validation)':<30}")
+        for cls, count in zip(unique, counts):
+            percentage = (count / len(y_true)) * 100
+            class_label = class_names[cls] if class_names else str(cls)
+            print(f"  Class {class_label:<5} {count:3d} samples ({percentage:5.1f}%)")
+        
+        # Training set info if provided
+        if train_samples is not None:
+            print(f"\n{'Training Samples':<30} {len(train_samples)}")
+            train_labels = [s.label for s in train_samples]
+            train_unique, train_counts = np.unique(train_labels, return_counts=True)
+            print(f"{'Class Distribution (Training)':<30}")
+            for cls, count in zip(train_unique, train_counts):
+                percentage = (count / len(train_labels)) * 100
+                class_label = class_names[cls] if class_names else str(cls)
+                print(f"  Class {class_label:<5} {count:3d} samples ({percentage:5.1f}%)")
+
+        # =====================================================================
+        # 3. OVERALL METRICS
+        # =====================================================================
+        print("\n" + "="*80)
+        print("📊 OVERALL METRICS:")
+        print("="*80)
+
+        # Calculate all metrics
+        accuracy = accuracy_score(y_true, y_pred)
+        balanced_acc = balanced_accuracy_score(y_true, y_pred)
+        kappa = cohen_kappa_score(y_true, y_pred)
+        
+        precision_macro = precision_score(y_true, y_pred, average='macro', zero_division=0)
+        recall_macro = recall_score(y_true, y_pred, average='macro', zero_division=0)
+        f1_macro = f1_score(y_true, y_pred, average='macro', zero_division=0)
+
+        precision_weighted = precision_score(y_true, y_pred, average='weighted', zero_division=0)
+        recall_weighted = recall_score(y_true, y_pred, average='weighted', zero_division=0)
+        f1_weighted = f1_score(y_true, y_pred, average='weighted', zero_division=0)
+
+        print(f"\n{'Metric':<30} {'Score':<15} {'Interpretation':<30}")
+        print("-" * 80)
+        
+        print(f"{'Accuracy':<30} {accuracy:<15.4f} {self._interpret_score(accuracy):<30}")
+        print(f"{'Balanced Accuracy':<30} {balanced_acc:<15.4f} {'(Fair for imbalanced data)':<30}")
+        print(f"{'Cohen\'s Kappa':<30} {kappa:<15.4f} {self._interpret_kappa(kappa):<30}")
+        
+        print(f"\n{'Macro-averaged Metrics':<30}")
+        print(f"{'  Precision':<28} {precision_macro:<15.4f}")
+        print(f"{'  Recall':<28} {recall_macro:<15.4f}")
+        print(f"{'  F1-Score':<28} {f1_macro:<15.4f}")
+        
+        print(f"\n{'Weighted-averaged Metrics':<30}")
+        print(f"{'  Precision':<28} {precision_weighted:<15.4f}")
+        print(f"{'  Recall':<28} {recall_weighted:<15.4f}")
+        print(f"{'  F1-Score':<28} {f1_weighted:<15.4f}")
+
+        # =====================================================================
+        # 4. PER-CLASS METRICS
+        # =====================================================================
+        print("\n" + "="*80)
+        print("📋 PER-CLASS METRICS:")
+        print("="*80)
+        print(classification_report(y_true, y_pred, target_names=class_names, digits=4))
+
+        # =====================================================================
+        # 5. SUMMARY & RECOMMENDATIONS
+        # =====================================================================
+        print("\n" + "="*80)
+        print("💡 SUMMARY & RECOMMENDATIONS:")
+        print("="*80)
+        
+        # Check for class imbalance
+        if len(counts) > 1:
+            imbalance_ratio = max(counts) / min(counts)
+            if imbalance_ratio > 2:
+                print(f"\n⚠️  Class Imbalance Detected: Ratio = {imbalance_ratio:.2f}x")
+                print("   Recommendation: Consider using weighted loss (already used in CrossEntropyLoss)")
+            else:
+                print(f"\n✓ Balanced dataset: Ratio = {imbalance_ratio:.2f}x")
+        
+        # Performance assessment
+        print(f"\n📈 Performance Assessment:")
+        if f1_macro >= 0.6:
+            print(f"   ✓ F1-Macro ({f1_macro:.4f}) meets challenge target!")
+        else:
+            gap = 0.6 - f1_macro
+            print(f"   ⚠️  F1-Macro ({f1_macro:.4f}) - Gap to target: {gap:.4f}")
+            print("   Suggestions:")
+            print("   - Increase training epochs")
+            print("   - Adjust learning rate")
+            print("   - Try different feature extractors (HuBERT, WavLM)")
+            print("   - Increase model capacity (hidden_dim, file_processor_dim)")
+
+        # Kappa interpretation
+        print(f"\n🎯 Agreement Quality (Cohen's Kappa = {kappa:.4f}):")
+        if kappa >= 0.81:
+            print("   ✓ Almost Perfect Agreement")
+        elif kappa >= 0.61:
+            print("   ✓ Substantial Agreement")
+        elif kappa >= 0.41:
+            print("   ⚠️  Moderate Agreement")
+        else:
+            print("   ⚠️  Fair/Poor Agreement")
+
+        print("\n" + "="*80 + "\n")
+
+        return {
+            'accuracy': accuracy,
+            'balanced_accuracy': balanced_acc,
+            'cohen_kappa': kappa,
+            'f1_macro': f1_macro,
+            'f1_weighted': f1_weighted,
+            'precision_macro': precision_macro,
+            'recall_macro': recall_macro,
+            'precision_weighted': precision_weighted,
+            'recall_weighted': recall_weighted
+        }
+
+    @staticmethod
+    def _interpret_score(score: float) -> str:
+        """Interpret score quality."""
+        if score >= 0.9:
+            return "Excellent"
+        elif score >= 0.8:
+            return "Very Good"
+        elif score >= 0.7:
+            return "Good"
+        elif score >= 0.6:
+            return "Fair"
+        else:
+            return "Poor"
+
+    @staticmethod
+    def _interpret_kappa(kappa: float) -> str:
+        """Interpret Cohen's Kappa."""
+        if kappa >= 0.81:
+            return "Almost Perfect"
+        elif kappa >= 0.61:
+            return "Substantial"
+        elif kappa >= 0.41:
+            return "Moderate"
+        elif kappa >= 0.21:
+            return "Fair"
+        else:
+            return "Slight/Poor"
 
 # ============================================================================
 # Create Train- and Val-Dataset from Excel
@@ -726,6 +991,8 @@ def main():
         pooling="mean",
         device=DEVICE
     )
+    logger.info("✓ Feature extractor initialized.")
+
     # feature_extractor = HuBERTExtractor(
     #     model_name="facebook/hubert-large-ll60k",
     #     pooling="mean",
@@ -743,6 +1010,7 @@ def main():
     # 2. Load dataset with predefined train/val split from Excel
     logger.info("Loading dataset from Excel sheets...")
     train_samples, val_samples = load_train_val_datasets()
+    logger.info("✓ Dataset loaded.")
 
     if len(train_samples) == 0 or len(val_samples) == 0:
         logger.error("Failed to load train or validation samples!")
@@ -764,6 +1032,7 @@ def main():
                              shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE,
                            shuffle=False, collate_fn=collate_fn)
+    logger.info("✓ Dataloaders created.")
 
     # 4. Create model
     logger.info("Creating model...")
@@ -777,7 +1046,7 @@ def main():
         dropout=0.3,
         shared_file_processor=False
     )
-
+    logger.info("✓ Model created.")
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # 5. Create pipeline and train
@@ -791,19 +1060,51 @@ def main():
         lr=1e-3,
         weight_decay=1e-4
     )
-    logger.info("Training completed.")
+    logger.info("✓ Training completed.")
 
-    # 6. Save model
-    logger.info("Saving model...")
+    # 6. Plot training history
+    logger.info("\n📊 Plotting training history...")
+    pipeline.plot_training_history()
+    logger.info("✓ Training history plotted.")
+
+    # 7. Detailed evaluation on validation set
+    logger.info("\n📋 Evaluating on validation set...")
+    val_preds, val_labels = pipeline.predict_batch(val_loader)
+    logger.info("✓ Evaluation completed.")
+
+    # Class names basierend auf den Labels
+    class_names = [str(i) for i in sorted(set(val_labels))]
+
+    # Print detailed metrics
+    metrics = pipeline.print_evaluation_report(
+        val_labels, 
+        val_preds, 
+        class_names=class_names,
+        train_samples=train_samples,
+        val_samples=val_samples      
+    )
+
+    # Plot confusion matrix
+    logger.info("\n📊 Plotting confusion matrix...")
+    pipeline.plot_confusion_matrix(val_labels, val_preds, class_names=class_names)
+    logger.info("✓ Confusion matrix plotted.")
+
+    # 8. Save model
+    logger.info("\n💾Saving model...")
     pipeline.save("late_fusion_model.pth")
+    logger.info("✓ Model saved.")
 
-    # 7. Example inference
+    # 9. Example inference
+    logger.info("\n🔮 Example predictions on validation set:")
     if len(val_samples) > 0:
         test_sample = val_samples[0]
         prediction = pipeline.predict(test_sample.file_paths)
         logger.info(f"\nExample prediction for {test_sample.individual_id}:")
         logger.info(f"  Predicted: {prediction}, True: {test_sample.label}")
 
+    logger.info("\n" + "="*70)
+    logger.info("✓ Pipeline completed successfully!")
+    logger.info("="*70)
 
 if __name__ == "__main__":
     main()
