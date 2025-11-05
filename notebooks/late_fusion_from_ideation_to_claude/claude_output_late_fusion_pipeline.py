@@ -1,7 +1,16 @@
-# TODO Loss in NN mit einbauen, weil bei Trainingsdaten 3 Frauen und 1 Mann und im Testset 1 Mann/Frau
 # f1-macro war bei dem Evaluationset bei der Challenge bei 0.6 -> in die Nähe sollen wir auch kommen
 """
 Late Fusion Pipeline for Multi-File Audio Classification
+
+CHALLENGE TARGET: F1-Macro ≥ 0.6
+
+Features:
+- Multi-file audio classification (8 files per individual)
+- Late fusion (feature-level or decision-level)
+- Class-balanced loss with automatic weighting
+- Early stopping with configurable metrics (F1, Accuracy, Loss)
+- Learning rate scheduling
+- Gradient clipping for stable training
 
 This pipeline extracts features from neural audio models (wav2vec2, HuBERT, WavLM)
 and performs late fusion to classify individuals based on multiple audio files.
@@ -25,6 +34,10 @@ import pandas as pd
 from sklearn.metrics import classification_report, confusion_matrix, f1_score, precision_score, recall_score, accuracy_score, cohen_kappa_score, balanced_accuracy_score
 import matplotlib.pyplot as plt
 import seaborn as sns
+import json
+from datetime import datetime
+import librosa
+from tqdm import tqdm
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -85,19 +98,13 @@ class Wav2Vec2Extractor(FeatureExtractor):
         audio = audio.to(self.device)
 
         with torch.no_grad():
-            outputs = self.model(audio)
-            # features = outputs.last_hidden_state  # (batch, time, hidden_dim)
-            features = outputs.hidden_states[12] # (batch, time, hidden_dim)
+            outputs = self.model(audio, output_hidden_states=True)
+            # Extract hidden states from layer 12 (0=embedding, 1-24=layers)
+            features = outputs.hidden_states[12]  # (batch, time, hidden_dim)
 
             # Pool over time dimension
             if self.pooling == "mean":
                 pooled = features.mean(dim=1)
-            # elif self.pooling == "max":
-            #     pooled = features.max(dim=1)[0]
-            # elif self.pooling == "first":
-            #     pooled = features[:, 0, :]
-            # elif self.pooling == "last":
-            #     pooled = features[:, -1, :]
             else:
                 raise ValueError(f"Unknown pooling: {self.pooling}")
 
@@ -129,18 +136,12 @@ class HuBERTExtractor(FeatureExtractor):
         audio = audio.to(self.device)
 
         with torch.no_grad():
-            outputs = self.model(audio)
-            # features = outputs.last_hidden_state
-            features = outputs.hidden_states[12] # (batch, time, hidden_dim)
+            outputs = self.model(audio, output_hidden_states=True)
+            # Extract hidden states from layer 12 (0=embedding, 1-24=layers)
+            features = outputs.hidden_states[12]  # (batch, time, hidden_dim)
 
             if self.pooling == "mean":
                 pooled = features.mean(dim=1)
-            # elif self.pooling == "max":
-            #     pooled = features.max(dim=1)[0]
-            # elif self.pooling == "first":
-            #     pooled = features[:, 0, :]
-            # elif self.pooling == "last":
-            #     pooled = features[:, -1, :]
             else:
                 raise ValueError(f"Unknown pooling: {self.pooling}")
 
@@ -172,18 +173,12 @@ class WavLMExtractor(FeatureExtractor):
         audio = audio.to(self.device)
 
         with torch.no_grad():
-            outputs = self.model(audio)
-            # features = outputs.last_hidden_state
-            features = outputs.hidden_states[12] # (batch, time, hidden_dim)
+            outputs = self.model(audio, output_hidden_states=True)
+            # Extract hidden states from layer 12 (0=embedding, 1-24=layers)
+            features = outputs.hidden_states[12]  # (batch, time, hidden_dim)
 
             if self.pooling == "mean":
                 pooled = features.mean(dim=1)
-            # elif self.pooling == "max":
-            #     pooled = features.max(dim=1)[0]
-            # elif self.pooling == "first":
-            #     pooled = features[:, 0, :]
-            # elif self.pooling == "last":
-            #     pooled = features[:, -1, :]
             else:
                 raise ValueError(f"Unknown pooling: {self.pooling}")
 
@@ -426,14 +421,22 @@ class MultiFileAudioDataset(Dataset):
         sample = self.samples[idx]
         file_features = []
 
-        for file_path in sample.file_paths:
+        if idx == 0:
+            logger.info(f"Loading first sample (ID: {sample.individual_id})...")
+
+        for file_idx, file_path in enumerate(sample.file_paths):
             # Load audio
             audio, sr = sf.read(str(file_path), dtype="float32")
 
-            # Resample if needed (simplified - use librosa for proper resampling)
+            if idx == 0 and file_idx == 0:
+                logger.info(f"  First audio file loaded: {file_path.name}, sr={sr}, duration={len(audio)/sr:.2f}s")
+
+            # Resample if needed using librosa
             if sr != self.target_sr:
-                logger.warning(f"Sample rate mismatch: {sr} vs {self.target_sr}. "
-                             "Consider using librosa.resample()")
+                audio = librosa.resample(audio, orig_sr=sr, target_sr=self.target_sr)
+                sr = self.target_sr
+                if idx == 0 and file_idx == 0:
+                    logger.info(f"  Resampled from {sr}Hz to {self.target_sr}Hz")
 
             # Convert to tensor
             audio_tensor = torch.from_numpy(audio)
@@ -441,6 +444,9 @@ class MultiFileAudioDataset(Dataset):
             # Extract features
             features = self.feature_extractor.extract(audio_tensor, sr)
             file_features.append(features.squeeze(0))  # Remove batch dim
+
+        if idx == 0:
+            logger.info(f"  Extracted features for all {len(file_features)} files")
 
         return file_features, sample.label
 
@@ -468,7 +474,8 @@ class LateFusionPipeline:
     """Complete pipeline for late fusion classification."""
 
     def __init__(self, feature_extractor: FeatureExtractor, model: LateFusionClassifier,
-                 device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"):
+                 device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
+                 experiment_name: Optional[str] = None):
         self.feature_extractor = feature_extractor
         self.model = model.to(device)
         self.device = device
@@ -478,6 +485,32 @@ class LateFusionPipeline:
             'train_acc': [],
             'val_loss': [],
             'val_acc': []
+        }
+        
+        # Experiment tracking
+        self.experiment_name = experiment_name or f"experiment_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.experiment_dir = Path("experiments") / self.experiment_name
+        self.experiment_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Experiment directory: {self.experiment_dir}")
+        
+        # Store configuration
+        self.config = {
+            'experiment_name': self.experiment_name,
+            'timestamp': datetime.now().isoformat(),
+            'device': device,
+            'feature_extractor': {
+                'type': feature_extractor.__class__.__name__,
+                'feature_dim': feature_extractor.get_feature_dim(),
+            },
+            'model': {
+                'num_files': model.num_files,
+                'num_classes': model.num_classes,
+                'fusion_type': model.fusion_type,
+                'shared_file_processor': model.shared_file_processor,
+                'total_parameters': sum(p.numel() for p in model.parameters()),
+                'trainable_parameters': sum(p.numel() for p in model.parameters() if p.requires_grad),
+            }
         }
 
     def train(self, train_loader: DataLoader, val_loader: Optional[DataLoader] = None,
@@ -496,25 +529,54 @@ class LateFusionPipeline:
             early_stopping_patience: Number of epochs without improvement before stopping
             early_stopping_metric: Metric for early stopping ("f1", "accuracy", "loss")
         """
+        # Store training hyperparameters
+        self.config['training'] = {
+            'epochs': epochs,
+            'lr': lr,
+            'weight_decay': weight_decay,
+            'max_grad_norm': max_grad_norm,
+            'early_stopping_patience': early_stopping_patience,
+            'early_stopping_metric': early_stopping_metric,
+            'batch_size': train_loader.batch_size,
+            'train_samples': len(train_loader.dataset),
+            'val_samples': len(val_loader.dataset) if val_loader else 0,
+        }
+        
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
         
         # Scheduler mode depends on metric (max for f1/accuracy, min for loss)
         scheduler_mode = 'min' if early_stopping_metric == 'loss' else 'max'
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode=scheduler_mode, factor=0.5, patience=3, verbose=True
+            optimizer, mode=scheduler_mode, factor=0.5, patience=3
         )
         
         # Class weights to handle imbalanced data
         all_labels = []
         for _, labels in train_loader:
             all_labels.extend(labels.numpy())
-        class_counts = np.bincount(all_labels)
-        class_weights = 1.0 / class_counts
-        class_weights = class_weights / class_weights.sum() * len(class_counts)
-        class_weights = torch.FloatTensor(class_weights).to(self.device)
         
-        criterion = nn.CrossEntropyLoss(weight=class_weights)
-        logger.info(f"Using class weights: {class_weights.cpu().numpy()}")
+        # Get unique classes and their counts
+        unique_classes = np.unique(all_labels)
+        num_classes = self.model.num_classes
+        
+        # Calculate class weights only for present classes
+        class_counts = np.bincount(all_labels, minlength=num_classes)
+        
+        # Check if all classes are present
+        if np.any(class_counts == 0):
+            missing_classes = np.where(class_counts == 0)[0]
+            logger.warning(f"⚠️  Classes with 0 samples in training: {missing_classes}")
+            logger.warning(f"⚠️  Class distribution: {class_counts}")
+            logger.warning(f"⚠️  Disabling class weights to avoid NaN")
+            criterion = nn.CrossEntropyLoss()
+        else:
+            # Safe calculation: only divide by non-zero counts
+            class_weights = 1.0 / class_counts
+            class_weights = class_weights / class_weights.sum() * len(class_counts)
+            class_weights = torch.FloatTensor(class_weights).to(self.device)
+            criterion = nn.CrossEntropyLoss(weight=class_weights)
+            logger.info(f"Using class weights: {class_weights.cpu().numpy()}")
+        
         logger.info(f"Early stopping: patience={early_stopping_patience}, metric={early_stopping_metric}")
 
         # Early stopping variables
@@ -524,12 +586,26 @@ class LateFusionPipeline:
 
         for epoch in range(epochs):
             # === TRAINING ===
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Starting Epoch {epoch+1}/{epochs}")
+            logger.info(f"{'='*60}")
+            
             self.model.train()
             train_loss = 0.0
             train_correct = 0
             train_total = 0
 
-            for file_features, labels in train_loader:
+            # Progress bar for training
+            train_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [Train]", 
+                            leave=False, ncols=100)
+
+            batch_num = 0
+            for file_features, labels in train_pbar:
+                batch_num += 1
+                if batch_num == 1:
+                    logger.info(f"Processing first batch of epoch {epoch+1}...")
+                if batch_num % 10 == 0:
+                    logger.info(f"Epoch {epoch+1}: Processed {batch_num} batches...")
                 # Move to device
                 file_features = [feat.to(self.device) for feat in file_features]
                 labels = labels.to(self.device)
@@ -550,6 +626,10 @@ class LateFusionPipeline:
                 preds = logits.argmax(dim=1)
                 train_correct += (preds == labels).sum().item()
                 train_total += labels.size(0)
+                
+                # Update progress bar
+                current_acc = train_correct / train_total if train_total > 0 else 0
+                train_pbar.set_postfix({'loss': f'{loss.item():.4f}', 'acc': f'{current_acc:.4f}'})
 
             train_acc = train_correct / train_total
             avg_train_loss = train_loss / len(train_loader)
@@ -616,6 +696,9 @@ class LateFusionPipeline:
             logger.info(f"\n✓ Training completed. Best model from epoch {best_epoch} loaded.")
         else:
             logger.info(f"\n✓ Training completed.")
+        
+        # Save experiment results
+        self._save_experiment_results(best_epoch, best_metric)
 
     def evaluate(self, data_loader: DataLoader) -> Tuple[float, float, float]:
         """Evaluate the model.
@@ -649,6 +732,134 @@ class LateFusionPipeline:
         f1_macro = f1_score(all_labels, all_preds, average='macro')
 
         return accuracy, avg_loss, f1_macro
+
+    def _save_experiment_results(self, best_epoch: int, best_metric: float):
+        """Save experiment configuration and training history."""
+        # Add training results to config
+        self.config['results'] = {
+            'best_epoch': best_epoch,
+            'best_metric': best_metric,
+            'final_train_loss': self.train_history['train_loss'][-1] if self.train_history['train_loss'] else None,
+            'final_train_acc': self.train_history['train_acc'][-1] if self.train_history['train_acc'] else None,
+            'final_val_loss': self.train_history['val_loss'][-1] if self.train_history['val_loss'] else None,
+            'final_val_acc': self.train_history['val_acc'][-1] if self.train_history['val_acc'] else None,
+        }
+        
+        # Save config as JSON
+        config_path = self.experiment_dir / "config.json"
+        with open(config_path, 'w') as f:
+            json.dump(self.config, f, indent=2)
+        logger.info(f"Configuration saved to {config_path}")
+        
+        # Save training history as CSV
+        history_df = pd.DataFrame(self.train_history)
+        history_path = self.experiment_dir / "training_history.csv"
+        history_df.to_csv(history_path, index=False)
+        logger.info(f"Training history saved to {history_path}")
+        
+        # Save training history plot
+        self._save_training_plots()
+    
+    def _save_training_plots(self):
+        """Save training history plots to experiment directory."""
+        if not self.train_history['epoch']:
+            return
+        
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+        
+        # Loss plot
+        ax1.plot(self.train_history['epoch'], self.train_history['train_loss'], 'b-o', label='Train Loss')
+        if self.train_history['val_loss']:
+            ax1.plot(self.train_history['epoch'], self.train_history['val_loss'], 'r-o', label='Val Loss')
+        ax1.set_xlabel('Epoch')
+        ax1.set_ylabel('Loss')
+        ax1.set_title('Training and Validation Loss')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Accuracy plot
+        ax2.plot(self.train_history['epoch'], self.train_history['train_acc'], 'b-o', label='Train Acc')
+        if self.train_history['val_acc']:
+            ax2.plot(self.train_history['epoch'], self.train_history['val_acc'], 'r-o', label='Val Acc')
+        ax2.set_xlabel('Epoch')
+        ax2.set_ylabel('Accuracy')
+        ax2.set_title('Training and Validation Accuracy')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plot_path = self.experiment_dir / "training_history.png"
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Training plots saved to {plot_path}")
+    
+    def save_evaluation_results(self, y_true: np.ndarray, y_pred: np.ndarray, 
+                               class_names: Optional[List[str]] = None,
+                               dataset_name: str = "validation"):
+        """Save evaluation results including metrics, confusion matrix, and predictions."""
+        eval_dir = self.experiment_dir / f"{dataset_name}_results"
+        eval_dir.mkdir(exist_ok=True)
+        
+        # Calculate all metrics
+        metrics = {
+            'accuracy': float(accuracy_score(y_true, y_pred)),
+            'balanced_accuracy': float(balanced_accuracy_score(y_true, y_pred)),
+            'cohen_kappa': float(cohen_kappa_score(y_true, y_pred)),
+            'f1_macro': float(f1_score(y_true, y_pred, average='macro', zero_division=0)),
+            'f1_weighted': float(f1_score(y_true, y_pred, average='weighted', zero_division=0)),
+            'precision_macro': float(precision_score(y_true, y_pred, average='macro', zero_division=0)),
+            'recall_macro': float(recall_score(y_true, y_pred, average='macro', zero_division=0)),
+            'precision_weighted': float(precision_score(y_true, y_pred, average='weighted', zero_division=0)),
+            'recall_weighted': float(recall_score(y_true, y_pred, average='weighted', zero_division=0)),
+        }
+        
+        # Save metrics as JSON
+        metrics_path = eval_dir / "metrics.json"
+        with open(metrics_path, 'w') as f:
+            json.dump(metrics, f, indent=2)
+        logger.info(f"Metrics saved to {metrics_path}")
+        
+        # Save predictions as CSV
+        predictions_df = pd.DataFrame({
+            'true_label': y_true,
+            'predicted_label': y_pred,
+            'correct': y_true == y_pred
+        })
+        predictions_path = eval_dir / "predictions.csv"
+        predictions_df.to_csv(predictions_path, index=False)
+        logger.info(f"Predictions saved to {predictions_path}")
+        
+        # Save classification report
+        report = classification_report(y_true, y_pred, target_names=class_names, digits=4)
+        report_path = eval_dir / "classification_report.txt"
+        with open(report_path, 'w') as f:
+            f.write(report)
+        logger.info(f"Classification report saved to {report_path}")
+        
+        # Save confusion matrix as CSV and plot
+        cm = confusion_matrix(y_true, y_pred)
+        cm_df = pd.DataFrame(cm, 
+                            index=[f"True_{c}" for c in (class_names or range(len(cm)))],
+                            columns=[f"Pred_{c}" for c in (class_names or range(len(cm)))])
+        cm_path = eval_dir / "confusion_matrix.csv"
+        cm_df.to_csv(cm_path)
+        logger.info(f"Confusion matrix saved to {cm_path}")
+        
+        # Plot and save confusion matrix
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+                   xticklabels=class_names or range(len(cm)),
+                   yticklabels=class_names or range(len(cm)))
+        plt.title(f'Confusion Matrix - {dataset_name.capitalize()}')
+        plt.ylabel('True Label')
+        plt.xlabel('Predicted Label')
+        plt.tight_layout()
+        cm_plot_path = eval_dir / "confusion_matrix.png"
+        plt.savefig(cm_plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Confusion matrix plot saved to {cm_plot_path}")
+        
+        return metrics
 
     def predict(self, file_paths: List[Path]) -> int:
         """Predict class for a single individual."""
@@ -688,6 +899,10 @@ class LateFusionPipeline:
 
     def save(self, path: Union[str, Path]):
         """Save model checkpoint."""
+        # If path is relative, save in experiment directory
+        if not Path(path).is_absolute():
+            path = self.experiment_dir / path
+        
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'model_config': {
@@ -695,7 +910,9 @@ class LateFusionPipeline:
                 'num_files': self.model.num_files,
                 'num_classes': self.model.num_classes,
                 'fusion_type': self.model.fusion_type,
-            }
+            },
+            'train_history': self.train_history,
+            'experiment_name': self.experiment_name,
         }, path)
         logger.info(f"Model saved to {path}")
 
@@ -979,9 +1196,9 @@ def create_dataset_from_excel(sheet_name: str, excel_path: Path) -> List[AudioSa
         "phonationI": "phonationI",
         "phonationO": "phonationO",
         "phonationU": "phonationU",
-        "rythmKA": "rythmKA",
-        "rythmPA": "rythmPA",
-        "rythmTA": "rythmTA",
+        "rhythmKA": "rhythmKA",
+        "rhythmPA": "rhythmPA",
+        "rhythmTA": "rhythmTA",
     }
     
     # Lese Excel-Sheet
@@ -1016,6 +1233,9 @@ def create_dataset_from_excel(sheet_name: str, excel_path: Path) -> List[AudioSa
         if len(file_paths) == 8:
             label = id_to_label[individual_id]
             
+            # Convert label from 1-based (1,2,3,4,5) to 0-based (0,1,2,3,4) for PyTorch
+            label = label - 1
+            
             sample = AudioSample(
                 file_paths=file_paths,
                 label=label,
@@ -1030,17 +1250,23 @@ def create_dataset_from_excel(sheet_name: str, excel_path: Path) -> List[AudioSa
     return samples
 
 
-def load_train_val_datasets() -> Tuple[List[AudioSample], List[AudioSample]]:
+def load_train_val_datasets(excel_path: Optional[Path] = None) -> Tuple[List[AudioSample], List[AudioSample]]:
     """
     Load separate training and validation datasets from Excel sheets.
+    
+    Args:
+        excel_path: Path to Excel file. If None, uses default path.
     
     Returns:
         (train_samples, val_samples)
     """
-    excel_path = Path("/Users/fabian.drzimalla/Master_Projects/SLP_PStA_Team_Drzimalla_Diakourakis/data/task1/sand_task_1.xlsx")
+    if excel_path is None:
+        # Default path - adjust this to your project structure
+        excel_path = Path("data/task1/sand_task_1.xlsx")
     
     if not excel_path.exists():
         logger.error(f"Excel file not found: {excel_path}")
+        logger.info("Please provide the correct path to your Excel file.")
         return [], []
     
     # Lade Training-Set
@@ -1074,6 +1300,17 @@ def main():
     EPOCHS = 20
     DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
+    logger.info(f"Device Selection:")
+    logger.info(f"  CUDA available: {torch.cuda.is_available()}")
+    logger.info(f"  MPS available: {torch.backends.mps.is_available()}")
+    logger.info(f"  MPS built: {torch.backends.mps.is_built()}")
+    logger.info(f"  Selected device: {DEVICE}")
+    
+    if DEVICE == "cpu":
+        logger.warning("⚠️  WARNING: Using CPU! Training will be VERY slow (hours instead of minutes)")
+        logger.warning("⚠️  For M1/M2 Mac: Install PyTorch with MPS support:")
+        logger.warning("⚠️    pip3 install torch torchvision torchaudio")
+    
     logger.info(f"Using device: {DEVICE}")
 
     # 1. Choose and initialize feature extractor
@@ -1175,6 +1412,9 @@ def main():
         train_samples=train_samples,
         val_samples=val_samples      
     )
+    
+    # Save evaluation results
+    pipeline.save_evaluation_results(val_labels, val_preds, class_names=class_names)
 
     # Plot confusion matrix
     logger.info("\n📊 Plotting confusion matrix...")
@@ -1183,7 +1423,7 @@ def main():
 
     # 8. Save model
     logger.info("\n💾Saving model...")
-    pipeline.save("late_fusion_model.pth")
+    pipeline.save("final_model.pth")
     logger.info("✓ Model saved.")
 
     # 9. Example inference
