@@ -87,7 +87,7 @@ class Wav2Vec2Extractor(FeatureExtractor):
         with torch.no_grad():
             outputs = self.model(audio)
             # features = outputs.last_hidden_state  # (batch, time, hidden_dim)
-            features = outputs[:,:,12]# (batch, time, hidden_dim)
+            features = outputs.hidden_states[12] # (batch, time, hidden_dim)
 
             # Pool over time dimension
             if self.pooling == "mean":
@@ -131,7 +131,7 @@ class HuBERTExtractor(FeatureExtractor):
         with torch.no_grad():
             outputs = self.model(audio)
             # features = outputs.last_hidden_state
-            features = outputs[:,:,12]# (batch, time, hidden_dim)
+            features = outputs.hidden_states[12] # (batch, time, hidden_dim)
 
             if self.pooling == "mean":
                 pooled = features.mean(dim=1)
@@ -174,7 +174,7 @@ class WavLMExtractor(FeatureExtractor):
         with torch.no_grad():
             outputs = self.model(audio)
             # features = outputs.last_hidden_state
-            features = outputs[:,:,12]# (batch, time, hidden_dim)
+            features = outputs.hidden_states[12] # (batch, time, hidden_dim)
 
             if self.pooling == "mean":
                 pooled = features.mean(dim=1)
@@ -472,17 +472,55 @@ class LateFusionPipeline:
         self.feature_extractor = feature_extractor
         self.model = model.to(device)
         self.device = device
+        self.train_history = {
+            'epoch': [],
+            'train_loss': [],
+            'train_acc': [],
+            'val_loss': [],
+            'val_acc': []
+        }
 
     def train(self, train_loader: DataLoader, val_loader: Optional[DataLoader] = None,
-              epochs: int = 10, lr: float = 1e-3, weight_decay: float = 1e-4):
-        """Train the model."""
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='max', factor=0.5, patience=3, verbose=True
-        )
-        criterion = nn.CrossEntropyLoss()
+              epochs: int = 10, lr: float = 1e-3, weight_decay: float = 1e-4, max_grad_norm: float = 1.0,
+              early_stopping_patience: int = 5, early_stopping_metric: str = "f1"):
+        """
+        Train the model with early stopping.
 
-        best_val_acc = 0.0
+        Args:
+            train_loader: DataLoader for the training set
+            val_loader: DataLoader for the validation set
+            epochs: Number of training epochs
+            lr: Learning rate
+            weight_decay: Weight decay for the optimizer
+            max_grad_norm: Maximum norm for gradient clipping
+            early_stopping_patience: Number of epochs without improvement before stopping
+            early_stopping_metric: Metric for early stopping ("f1", "accuracy", "loss")
+        """
+        optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+        
+        # Scheduler mode depends on metric (max for f1/accuracy, min for loss)
+        scheduler_mode = 'min' if early_stopping_metric == 'loss' else 'max'
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode=scheduler_mode, factor=0.5, patience=3, verbose=True
+        )
+        
+        # Class weights to handle imbalanced data
+        all_labels = []
+        for _, labels in train_loader:
+            all_labels.extend(labels.numpy())
+        class_counts = np.bincount(all_labels)
+        class_weights = 1.0 / class_counts
+        class_weights = class_weights / class_weights.sum() * len(class_counts)
+        class_weights = torch.FloatTensor(class_weights).to(self.device)
+        
+        criterion = nn.CrossEntropyLoss(weight=class_weights)
+        logger.info(f"Using class weights: {class_weights.cpu().numpy()}")
+        logger.info(f"Early stopping: patience={early_stopping_patience}, metric={early_stopping_metric}")
+
+        # Early stopping variables
+        best_metric = 0.0 if early_stopping_metric != "loss" else float('inf')
+        patience_counter = 0
+        best_epoch = 0
 
         for epoch in range(epochs):
             # === TRAINING ===
@@ -503,6 +541,8 @@ class LateFusionPipeline:
                 # Backward
                 optimizer.zero_grad()
                 loss.backward()
+                # Gradient Clipping
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=max_grad_norm)
                 optimizer.step()
 
                 # Metrics
@@ -514,30 +554,81 @@ class LateFusionPipeline:
             train_acc = train_correct / train_total
             avg_train_loss = train_loss / len(train_loader)
 
+            self.train_history['epoch'].append(epoch + 1)
+            self.train_history['train_loss'].append(avg_train_loss)
+            self.train_history['train_acc'].append(train_acc)
+
             # === VALIDATION ===
             if val_loader is not None:
-                val_acc, val_loss = self.evaluate(val_loader)
-                scheduler.step(val_acc)
+                val_acc, val_loss, val_f1 = self.evaluate(val_loader)
+                self.train_history['val_loss'].append(val_loss)
+                self.train_history['val_acc'].append(val_acc)
+                
+                # Select metric for scheduler and early stopping
+                if early_stopping_metric == "f1":
+                    current_metric = val_f1
+                    scheduler.step(val_f1)
+                elif early_stopping_metric == "accuracy":
+                    current_metric = val_acc
+                    scheduler.step(val_acc)
+                else:  # loss
+                    current_metric = val_loss
+                    scheduler.step(val_loss)
 
                 logger.info(f"Epoch {epoch+1}/{epochs}: "
                           f"Train Loss={avg_train_loss:.4f}, Train Acc={train_acc:.4f}, "
-                          f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f}")
+                          f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f}, Val F1={val_f1:.4f}")
 
-                if val_acc > best_val_acc:
-                    best_val_acc = val_acc
-                    logger.info(f"New best validation accuracy: {best_val_acc:.4f}")
+                # Early Stopping Check
+                improved = False
+                if early_stopping_metric == "loss":
+                    improved = current_metric < best_metric
+                else:
+                    improved = current_metric > best_metric
+                
+                if improved:
+                    best_metric = current_metric
+                    patience_counter = 0
+                    best_epoch = epoch + 1
+                    
+                    # Auto-save best model
+                    self.save("best_model_checkpoint.pth")
+                    logger.info(f"✓ New best {early_stopping_metric}: {best_metric:.4f} (saved checkpoint)")
+                else:
+                    patience_counter += 1
+                    logger.info(f"⚠️  No improvement for {patience_counter}/{early_stopping_patience} epochs")
+                    
+                    if patience_counter >= early_stopping_patience:
+                        logger.info(f"\n{'='*70}")
+                        logger.info(f"🛑 EARLY STOPPING after epoch {epoch+1}")
+                        logger.info(f"   Best {early_stopping_metric}: {best_metric:.4f} at epoch {best_epoch}")
+                        logger.info(f"   Loading best model from checkpoint...")
+                        logger.info(f"{'='*70}\n")
+                        
+                        # Load best model back
+                        self.load("best_model_checkpoint.pth")
+                        break
             else:
                 logger.info(f"Epoch {epoch+1}/{epochs}: "
                           f"Train Loss={avg_train_loss:.4f}, Train Acc={train_acc:.4f}")
+        
+        if val_loader is not None:
+            logger.info(f"\n✓ Training completed. Best model from epoch {best_epoch} loaded.")
+        else:
+            logger.info(f"\n✓ Training completed.")
 
-    def evaluate(self, data_loader: DataLoader) -> Tuple[float, float]:
-        """Evaluate the model."""
+    def evaluate(self, data_loader: DataLoader) -> Tuple[float, float, float]:
+        """Evaluate the model.
+        
+        Returns:
+            Tuple[float, float, float]: (accuracy, avg_loss, f1_macro)
+        """
         self.model.eval()
         criterion = nn.CrossEntropyLoss()
 
         total_loss = 0.0
-        correct = 0
-        total = 0
+        all_preds = []
+        all_labels = []
 
         with torch.no_grad(): # Keine Gradients berechnen
             for file_features, labels in data_loader:
@@ -549,14 +640,15 @@ class LateFusionPipeline:
 
                 total_loss += loss.item()
                 preds = logits.argmax(dim=1)
-                correct += (preds == labels).sum().item()
-                total += labels.size(0)
 
-        accuracy = correct / total
+                all_preds.extend(preds.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+
+        accuracy = accuracy_score(all_labels, all_preds)
         avg_loss = total_loss / len(data_loader)
-        # TODO F1-average Score hinzufügen, falls ungleich avg_loss
+        f1_macro = f1_score(all_labels, all_preds, average='macro')
 
-        return accuracy, avg_loss
+        return accuracy, avg_loss, f1_macro
 
     def predict(self, file_paths: List[Path]) -> int:
         """Predict class for a single individual."""
