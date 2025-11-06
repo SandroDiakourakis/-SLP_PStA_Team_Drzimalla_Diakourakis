@@ -32,6 +32,8 @@ from abc import ABC, abstractmethod
 import logging
 import pandas as pd
 from sklearn.metrics import classification_report, confusion_matrix, f1_score, precision_score, recall_score, accuracy_score, cohen_kappa_score, balanced_accuracy_score
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for server/terminal environments
 import matplotlib.pyplot as plt
 import seaborn as sns
 import json
@@ -918,6 +920,10 @@ class LateFusionPipeline:
 
     def load(self, path: Union[str, Path]):
         """Load model checkpoint."""
+        # If path is relative, load from experiment directory
+        if not Path(path).is_absolute():
+            path = self.experiment_dir / path
+        
         checkpoint = torch.load(path, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         logger.info(f"Model loaded from {path}")
@@ -949,7 +955,12 @@ class LateFusionPipeline:
         ax2.grid(True, alpha=0.3)
 
         plt.tight_layout()
-        plt.show()
+        
+        # Save plot instead of showing it (for non-interactive environments)
+        plot_path = self.experiment_dir / "training_history_final.png"
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Training history plot saved to {plot_path}")
 
     def plot_confusion_matrix(self, y_true: np.ndarray, y_pred: np.ndarray, 
                              class_names: Optional[List[str]] = None):
@@ -963,7 +974,12 @@ class LateFusionPipeline:
         plt.ylabel('True Label')
         plt.xlabel('Predicted Label')
         plt.tight_layout()
-        plt.show()
+        
+        # Save plot instead of showing it (for non-interactive environments)
+        plot_path = self.experiment_dir / "confusion_matrix_final.png"
+        plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Confusion matrix plot saved to {plot_path}")
 
     def print_evaluation_report(self, y_true: np.ndarray, y_pred: np.ndarray,
                                class_names: Optional[List[str]] = None,
@@ -1316,7 +1332,7 @@ def main():
     # 1. Choose and initialize feature extractor
     logger.info("Initializing feature extractor...")
     feature_extractor = Wav2Vec2Extractor(
-        model_name="facebook/wav2vec2-base-960h", # or use default "facebook/wav2vec2-large"
+        model_name="facebook/wav2vec2-large", #"facebook/wav2vec2-base-960h" or use default "facebook/wav2vec2-large"
         pooling="mean",
         device=DEVICE
     )
@@ -1386,7 +1402,7 @@ def main():
         train_loader=train_loader,
         val_loader=val_loader,
         epochs=EPOCHS,
-        lr=1e-3,
+        lr=5e-4,
         weight_decay=1e-4
     )
     logger.info("✓ Training completed.")
