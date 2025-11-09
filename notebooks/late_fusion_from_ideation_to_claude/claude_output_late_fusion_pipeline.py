@@ -393,6 +393,7 @@ class AudioSample:
     file_paths: List[Path]
     label: int
     individual_id: str
+    sex: Optional[int] = None  # 0=male, 1=female, None=unknown
 
 
 class MultiFileAudioDataset(Dataset):
@@ -413,12 +414,13 @@ class MultiFileAudioDataset(Dataset):
     def __len__(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx: int) -> Tuple[List[torch.Tensor], int]:
+    def __getitem__(self, idx: int) -> Tuple[List[torch.Tensor], int, Optional[int]]:
         """
         Returns:
-            (file_features, label):
+            (file_features, label, sex):
                 - file_features: List of feature tensors, one per file
                 - label: Class label
+                - sex: Sex attribute (0=male, 1=female, None=unknown)
         """
         sample = self.samples[idx]
         file_features = []
@@ -450,10 +452,17 @@ class MultiFileAudioDataset(Dataset):
         if idx == 0:
             logger.info(f"  Extracted features for all {len(file_features)} files")
 
-        return file_features, sample.label
+        return file_features, sample.label, sample.sex
 
-def collate_fn(batch: List[Tuple[List[torch.Tensor], int]]) -> Tuple[List[torch.Tensor], torch.Tensor]:
-    """Custom collate function for batching multi-file samples."""
+def collate_fn(batch: List[Tuple[List[torch.Tensor], int, Optional[int]]]) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor]:
+    """Custom collate function for batching multi-file samples with sex attribute.
+    
+    Returns:
+        (batched_features, labels, sex_tensor):
+            - batched_features: List of tensors, one per file
+            - labels: Tensor of class labels (long)
+            - sex_tensor: Tensor of sex attributes (long), -1 for unknown/None
+    """
     num_files = len(batch[0][0])
     batch_size = len(batch)
 
@@ -464,8 +473,12 @@ def collate_fn(batch: List[Tuple[List[torch.Tensor], int]]) -> Tuple[List[torch.
         batched_features.append(file_batch)
 
     labels = torch.tensor([sample[1] for sample in batch], dtype=torch.long)
+    
+    # Convert sex to tensor: None -> -1, 0 -> 0, 1 -> 1
+    sex_list = [sample[2] if sample[2] is not None else -1 for sample in batch]
+    sex_tensor = torch.tensor(sex_list, dtype=torch.long)
 
-    return batched_features, labels
+    return batched_features, labels, sex_tensor
 
 
 # ============================================================================
@@ -485,8 +498,10 @@ class LateFusionPipeline:
             'epoch': [],
             'train_loss': [],
             'train_acc': [],
+            'train_f1': [],
             'val_loss': [],
-            'val_acc': []
+            'val_acc': [],
+            'val_f1': [],
         }
         
         # Experiment tracking
@@ -517,9 +532,9 @@ class LateFusionPipeline:
 
     def train(self, train_loader: DataLoader, val_loader: Optional[DataLoader] = None,
               epochs: int = 10, lr: float = 1e-3, weight_decay: float = 1e-4, max_grad_norm: float = 1.0,
-              early_stopping_patience: int = 5, early_stopping_metric: str = "f1"):
+              early_stopping_patience: int = 5, early_stopping_metric: str = "f1", lambda_fair: float = 0.1):
         """
-        Train the model with early stopping.
+        Train the model with early stopping and optional fairness regularization.
 
         Args:
             train_loader: DataLoader for the training set
@@ -530,6 +545,7 @@ class LateFusionPipeline:
             max_grad_norm: Maximum norm for gradient clipping
             early_stopping_patience: Number of epochs without improvement before stopping
             early_stopping_metric: Metric for early stopping ("f1", "accuracy", "loss")
+            lambda_fair: Weight for fairness regularization term (0.0 = disabled)
         """
         # Store training hyperparameters
         self.config['training'] = {
@@ -539,6 +555,7 @@ class LateFusionPipeline:
             'max_grad_norm': max_grad_norm,
             'early_stopping_patience': early_stopping_patience,
             'early_stopping_metric': early_stopping_metric,
+            'lambda_fair': lambda_fair,
             'batch_size': train_loader.batch_size,
             'train_samples': len(train_loader.dataset),
             'val_samples': len(val_loader.dataset) if val_loader else 0,
@@ -554,7 +571,7 @@ class LateFusionPipeline:
         
         # Class weights to handle imbalanced data
         all_labels = []
-        for _, labels in train_loader:
+        for _, labels, _ in train_loader:  # Now includes sex tensor
             all_labels.extend(labels.numpy())
         
         # Get unique classes and their counts
@@ -580,6 +597,13 @@ class LateFusionPipeline:
             logger.info(f"Using class weights: {class_weights.cpu().numpy()}")
         
         logger.info(f"Early stopping: patience={early_stopping_patience}, metric={early_stopping_metric}")
+        
+        # Fairness regularization setup
+        if lambda_fair > 0:
+            logger.info(f"Fairness regularization enabled: lambda_fair={lambda_fair}")
+            logger.info("  Will balance loss across sex groups (male=0, female=1)")
+        else:
+            logger.info("Fairness regularization disabled (lambda_fair=0)")
 
         # Early stopping variables
         best_metric = 0.0 if early_stopping_metric != "loss" else float('inf')
@@ -596,13 +620,20 @@ class LateFusionPipeline:
             train_loss = 0.0
             train_correct = 0
             train_total = 0
+             
+            # For F1 calculation
+            train_all_preds = []
+            train_all_labels = []
+            
+            # Fairness tracking
+            epoch_fairness_losses = []
 
             # Progress bar for training
             train_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [Train]", 
                             leave=False, ncols=100)
 
             batch_num = 0
-            for file_features, labels in train_pbar:
+            for file_features, labels, sex in train_pbar:
                 batch_num += 1
                 if batch_num == 1:
                     logger.info(f"Processing first batch of epoch {epoch+1}...")
@@ -611,10 +642,38 @@ class LateFusionPipeline:
                 # Move to device
                 file_features = [feat.to(self.device) for feat in file_features]
                 labels = labels.to(self.device)
+                sex = sex.to(self.device)
 
                 # Forward
                 logits = self.model(file_features)
-                loss = criterion(logits, labels)
+                loss_main = criterion(logits, labels)
+                
+                # Fairness regularization (if enabled)
+                loss_fairness = torch.tensor(0.0, device=self.device)
+                if lambda_fair > 0:
+                    # Compute per-sample losses (reduction='none')
+                    per_sample_losses = F.cross_entropy(logits, labels, reduction='none')
+                    
+                    # Separate by sex (0=male, 1=female, -1=unknown)
+                    male_mask = (sex == 0)
+                    female_mask = (sex == 1)
+                    
+                    # Calculate group losses if groups exist
+                    loss_male = per_sample_losses[male_mask].mean() if male_mask.sum() > 0 else None
+                    loss_female = per_sample_losses[female_mask].mean() if female_mask.sum() > 0 else None
+                    
+                    # Fairness penalty: |loss_male - loss_female|
+                    if loss_male is not None and loss_female is not None:
+                        loss_gap = torch.abs(loss_male - loss_female)
+                        loss_fairness = lambda_fair * loss_gap
+                        epoch_fairness_losses.append({
+                            'loss_male': loss_male.item(),
+                            'loss_female': loss_female.item(),
+                            'loss_gap': loss_gap.item()
+                        })
+                
+                # Total loss
+                loss = loss_main + loss_fairness
 
                 # Backward
                 optimizer.zero_grad()
@@ -629,23 +688,39 @@ class LateFusionPipeline:
                 train_correct += (preds == labels).sum().item()
                 train_total += labels.size(0)
                 
+                # Collect predictions and labels for F1 calculation
+                train_all_preds.extend(preds.cpu().numpy())
+                train_all_labels.extend(labels.cpu().numpy())
+                
                 # Update progress bar
                 current_acc = train_correct / train_total if train_total > 0 else 0
                 train_pbar.set_postfix({'loss': f'{loss.item():.4f}', 'acc': f'{current_acc:.4f}'})
 
             train_acc = train_correct / train_total
             avg_train_loss = train_loss / len(train_loader)
+            
+            # Calculate F1 score from accumulated predictions
+            train_f1 = f1_score(train_all_labels, train_all_preds, average='macro', zero_division=0)
 
             self.train_history['epoch'].append(epoch + 1)
             self.train_history['train_loss'].append(avg_train_loss)
             self.train_history['train_acc'].append(train_acc)
+            self.train_history['train_f1'].append(train_f1)
+            
+            # Log fairness metrics if available
+            if lambda_fair > 0 and epoch_fairness_losses:
+                avg_loss_male = np.mean([f['loss_male'] for f in epoch_fairness_losses])
+                avg_loss_female = np.mean([f['loss_female'] for f in epoch_fairness_losses])
+                avg_loss_gap = np.mean([f['loss_gap'] for f in epoch_fairness_losses])
+                logger.info(f"  Fairness: loss_male={avg_loss_male:.4f}, loss_female={avg_loss_female:.4f}, gap={avg_loss_gap:.4f}")
 
             # === VALIDATION ===
             if val_loader is not None:
                 val_acc, val_loss, val_f1 = self.evaluate(val_loader)
                 self.train_history['val_loss'].append(val_loss)
                 self.train_history['val_acc'].append(val_acc)
-                
+                self.train_history['val_f1'].append(val_f1)
+
                 # Select metric for scheduler and early stopping
                 if early_stopping_metric == "f1":
                     current_metric = val_f1
@@ -658,7 +733,7 @@ class LateFusionPipeline:
                     scheduler.step(val_loss)
 
                 logger.info(f"Epoch {epoch+1}/{epochs}: "
-                          f"Train Loss={avg_train_loss:.4f}, Train Acc={train_acc:.4f}, "
+                          f"Train Loss={avg_train_loss:.4f}, Train Acc={train_acc:.4f}, Train F1={train_f1:.4f}, "
                           f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.4f}, Val F1={val_f1:.4f}")
 
                 # Early Stopping Check
@@ -692,7 +767,7 @@ class LateFusionPipeline:
                         break
             else:
                 logger.info(f"Epoch {epoch+1}/{epochs}: "
-                          f"Train Loss={avg_train_loss:.4f}, Train Acc={train_acc:.4f}")
+                          f"Train Loss={avg_train_loss:.4f}, Train Acc={train_acc:.4f}, Train F1={train_f1:.4f}")
         
         if val_loader is not None:
             logger.info(f"\n✓ Training completed. Best model from epoch {best_epoch} loaded.")
@@ -716,9 +791,10 @@ class LateFusionPipeline:
         all_labels = []
 
         with torch.no_grad(): # Keine Gradients berechnen
-            for file_features, labels in data_loader:
+            for file_features, labels, sex in data_loader:  # Now includes sex tensor
                 file_features = [feat.to(self.device) for feat in file_features]
                 labels = labels.to(self.device)
+                # sex is not used in evaluation, only for training fairness
 
                 logits = self.model(file_features)
                 loss = criterion(logits, labels)
@@ -743,8 +819,10 @@ class LateFusionPipeline:
             'best_metric': best_metric,
             'final_train_loss': self.train_history['train_loss'][-1] if self.train_history['train_loss'] else None,
             'final_train_acc': self.train_history['train_acc'][-1] if self.train_history['train_acc'] else None,
+            'final_train_f1': self.train_history['train_f1'][-1] if self.train_history['train_f1'] else None,
             'final_val_loss': self.train_history['val_loss'][-1] if self.train_history['val_loss'] else None,
             'final_val_acc': self.train_history['val_acc'][-1] if self.train_history['val_acc'] else None,
+            'final_val_f1': self.train_history['val_f1'][-1] if self.train_history['val_f1'] else None,
         }
         
         # Save config as JSON
@@ -767,7 +845,7 @@ class LateFusionPipeline:
         if not self.train_history['epoch']:
             return
         
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
         
         # Loss plot
         ax1.plot(self.train_history['epoch'], self.train_history['train_loss'], 'b-o', label='Train Loss')
@@ -788,6 +866,16 @@ class LateFusionPipeline:
         ax2.set_title('Training and Validation Accuracy')
         ax2.legend()
         ax2.grid(True, alpha=0.3)
+
+        # F1 Score plot
+        ax3.plot(self.train_history['epoch'], self.train_history['train_f1'], 'b-o', label='Train F1')
+        if self.train_history['val_f1']:
+            ax3.plot(self.train_history['epoch'], self.train_history['val_f1'], 'r-o', label='Val F1')
+        ax3.set_xlabel('Epoch')
+        ax3.set_ylabel('F1 Score (Macro)')
+        ax3.set_title('Training and Validation F1 Score')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
         
         plt.tight_layout()
         plot_path = self.experiment_dir / "training_history.png"
@@ -887,9 +975,10 @@ class LateFusionPipeline:
         all_labels = []
 
         with torch.no_grad():
-            for file_features, labels in data_loader:
+            for file_features, labels, sex in data_loader:  # Now includes sex tensor
                 file_features = [feat.to(self.device) for feat in file_features]
                 labels = labels.to(self.device)
+                # sex is not used for prediction
 
                 logits = self.model(file_features)
                 preds = logits.argmax(dim=1)
@@ -924,7 +1013,9 @@ class LateFusionPipeline:
         if not Path(path).is_absolute():
             path = self.experiment_dir / path
         
-        checkpoint = torch.load(path, map_location=self.device)
+        # Use weights_only=False to load training history and other metadata
+        # This is safe for our own checkpoints
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         logger.info(f"Model loaded from {path}")
 
@@ -934,11 +1025,12 @@ class LateFusionPipeline:
             logger.warning("No training history available. Train the model first.")
             return
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
 
         # Loss plot
         ax1.plot(self.train_history['epoch'], self.train_history['train_loss'], 'b-o', label='Train Loss')
-        ax1.plot(self.train_history['epoch'], self.train_history['val_loss'], 'r-o', label='Val Loss')
+        if self.train_history['val_loss']:
+            ax1.plot(self.train_history['epoch'], self.train_history['val_loss'], 'r-o', label='Val Loss')
         ax1.set_xlabel('Epoch')
         ax1.set_ylabel('Loss')
         ax1.set_title('Training and Validation Loss')
@@ -947,12 +1039,23 @@ class LateFusionPipeline:
 
         # Accuracy plot
         ax2.plot(self.train_history['epoch'], self.train_history['train_acc'], 'b-o', label='Train Acc')
-        ax2.plot(self.train_history['epoch'], self.train_history['val_acc'], 'r-o', label='Val Acc')
+        if self.train_history['val_acc']:
+            ax2.plot(self.train_history['epoch'], self.train_history['val_acc'], 'r-o', label='Val Acc')
         ax2.set_xlabel('Epoch')
         ax2.set_ylabel('Accuracy')
         ax2.set_title('Training and Validation Accuracy')
         ax2.legend()
         ax2.grid(True, alpha=0.3)
+
+        # F1 Score plot
+        ax3.plot(self.train_history['epoch'], self.train_history['train_f1'], 'b-o', label='Train F1')
+        if self.train_history['val_f1']:
+            ax3.plot(self.train_history['epoch'], self.train_history['val_f1'], 'r-o', label='Val F1')
+        ax3.set_xlabel('Epoch')
+        ax3.set_ylabel('F1 Score (Macro)')
+        ax3.set_title('Training and Validation F1 Score')
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
 
         plt.tight_layout()
         
@@ -1228,6 +1331,28 @@ def create_dataset_from_excel(sheet_name: str, excel_path: Path) -> List[AudioSa
     # Erstelle Dictionary für schnelle Label-Abfrage: ID -> Class
     id_to_label = dict(zip(df_labels['ID'], df_labels['Class']))
     
+    # Erstelle Dictionary für Sex-Abfrage: ID -> Sex (0=male, 1=female, None=unknown)
+    id_to_sex = {}
+    if 'Sex' in df_labels.columns:
+        for idx, row in df_labels.iterrows():
+            individual_id = row['ID']
+            sex_value = row['Sex']
+            
+            # Map sex to integer: m/male/M -> 0, w/female/f/F/W -> 1
+            if pd.notna(sex_value):
+                sex_str = str(sex_value).strip().lower()
+                if sex_str in ['m', 'male', 'männlich']:
+                    id_to_sex[individual_id] = 0
+                elif sex_str in ['w', 'f', 'female', 'weiblich']:
+                    id_to_sex[individual_id] = 1
+                else:
+                    logger.warning(f"Unknown sex value '{sex_value}' for {individual_id}, setting to None")
+                    id_to_sex[individual_id] = None
+            else:
+                id_to_sex[individual_id] = None
+    else:
+        logger.warning("'Sex' column not found in Excel sheet - all sex values will be None")
+    
     # Für jeden Individuum aus dem Sheet: Sammle alle 8 Audio-Dateien
     for individual_id in df_labels['ID']:
         file_paths = []
@@ -1252,13 +1377,18 @@ def create_dataset_from_excel(sheet_name: str, excel_path: Path) -> List[AudioSa
             # Convert label from 1-based (1,2,3,4,5) to 0-based (0,1,2,3,4) for PyTorch
             label = label - 1
             
+            # Get sex attribute (can be 0, 1, or None)
+            sex = id_to_sex.get(individual_id, None)
+            
             sample = AudioSample(
                 file_paths=file_paths,
                 label=label,
-                individual_id=individual_id
+                individual_id=individual_id,
+                sex=sex
             )
             samples.append(sample)
-            logger.info(f"Added {individual_id}: label={label}, files={len(file_paths)}")
+            sex_str = "male" if sex == 0 else "female" if sex == 1 else "unknown"
+            logger.info(f"Added {individual_id}: label={label}, sex={sex_str}, files={len(file_paths)}")
         else:
             logger.warning(f"Incomplete data for {individual_id}: only {len(file_paths)}/8 files found")
     
@@ -1332,22 +1462,24 @@ def main():
     # 1. Choose and initialize feature extractor
     logger.info("Initializing feature extractor...")
     feature_extractor = Wav2Vec2Extractor(
-        model_name="facebook/wav2vec2-large", #"facebook/wav2vec2-base-960h" or use default "facebook/wav2vec2-large"
+        model_name="facebook/wav2vec2-base-960h", #"facebook/wav2vec2-base-960h", "facebook/wav2vec2-large"
         pooling="mean",
         device=DEVICE
     )
-    logger.info("✓ Feature extractor initialized.")
 
     # feature_extractor = HuBERTExtractor(
     #     model_name="facebook/hubert-large-ll60k",
     #     pooling="mean",
     #     device=DEVICE
     # )
+
     # feature_extractor = WavLMExtractor(
     #     model_name="microsoft/wavlm-large",
     #     pooling="mean",
     #     device=DEVICE
     # )
+
+    logger.info("✓ Feature extractor initialized.")
 
     feature_dim = feature_extractor.get_feature_dim()
     logger.info(f"Feature dimension: {feature_dim}")
@@ -1385,11 +1517,11 @@ def main():
         input_dim=feature_dim,
         num_files=NUM_FILES,
         num_classes=NUM_CLASSES,
-        fusion_type="feature",  # or "decision"
+        fusion_type="decision",  # "feature" or "decision"
         hidden_dim=256,
         file_processor_dim=128,
         dropout=0.3,
-        shared_file_processor=False
+        shared_file_processor=True # True or False
     )
     logger.info("✓ Model created.")
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -1445,7 +1577,7 @@ def main():
     # 9. Example inference
     logger.info("\n🔮 Example predictions on validation set:")
     if len(val_samples) > 0:
-        test_sample = val_samples[0]
+        test_sample = val_samples[23]
         prediction = pipeline.predict(test_sample.file_paths)
         logger.info(f"\nExample prediction for {test_sample.individual_id}:")
         logger.info(f"  Predicted: {prediction}, True: {test_sample.label}")
