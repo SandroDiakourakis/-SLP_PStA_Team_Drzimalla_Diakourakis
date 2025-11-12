@@ -1,0 +1,177 @@
+[2025-10-28 16:10:37,612][__main__][INFO] - Running command: train
+[2025-10-28 16:10:37,614][__main__][INFO] - Configuration:
+command: train
+seed: 42
+experiment_name: sand_task1
+output_dir: runs
+data:
+  root_dir: data/task1/training
+  manifest_dir: data/manifests
+  metadata_file: data/task1/sand_task_1.xlsx
+  sample_rate: 8000
+  tasks:
+  - phonationA
+  - phonationE
+  - phonationI
+  - phonationO
+  - phonationU
+  - rhythmKA
+  - rhythmPA
+  - rhythmTA
+labels:
+  num_classes: 5
+  class_names:
+  - ALS_Severe (1)
+  - ALS_Moderate (2)
+  - ALS_Mild (3)
+  - ALS_None (4)
+  - Healthy (5)
+  label_mapping:
+    1: ALS_Severe (1)
+    2: ALS_Moderate (2)
+    3: ALS_Mild (3)
+    4: ALS_None (4)
+    5: Healthy (5)
+split:
+  test_size: 0.2
+  stratify: true
+  min_samples_per_subject: 1
+features:
+  type: mfcc
+  mfcc:
+    n_mfcc: 20
+    n_fft: 2048
+    hop_length: 256
+    n_mels: 256
+    include_deltas: true
+    include_delta_deltas: true
+    statistics:
+    - mean
+    - std
+    - min
+    - max
+    - median
+    - q25
+    - q75
+    - iqr
+    - skewness
+    - kurtosis
+    - rms
+    - zcr
+  egemaps:
+    feature_set: eGeMAPSv02
+    feature_level: Functionals
+model:
+  name: xgboost
+  use_ensemble: true
+  params:
+    objective: multi:softmax
+    eval_metric: mlogloss
+    max_depth: 8
+    learning_rate: 0.05
+    n_estimators: 2000
+    subsample: 0.7
+    colsample_bytree: 0.6
+    min_child_weight: 3
+    gamma: 0.3
+    reg_alpha: 0.5
+    reg_lambda: 2.0
+    scale_pos_weight: 2.0
+    random_state: 42
+    tree_method: hist
+    device: cpu
+training:
+  cv_folds: 5
+  early_stopping_rounds: 100
+  use_class_weights: true
+  tune_hyperparameters: false
+  use_smote: true
+  smote_k_neighbors: 3
+  smote_sampling_strategy: not majority
+  tuning_grid:
+    max_depth:
+    - 8
+    - 10
+    learning_rate:
+    - 0.05
+    - 0.07
+    n_estimators:
+    - 2000
+    min_child_weight:
+    - 1
+    - 3
+    gamma:
+    - 0.3
+device: mps
+verbose: true
+save_predictions: true
+save_metrics: true
+save_confusion_matrix: true
+save_feature_importance: true
+
+[2025-10-28 16:10:37,614][sandcli.train][INFO] - ================================================================================
+[2025-10-28 16:10:37,614][sandcli.train][INFO] - STEP 4: MODEL TRAINING (ML)
+[2025-10-28 16:10:37,614][sandcli.train][INFO] - ================================================================================
+[2025-10-28 16:10:37,614][sandcli.train][INFO] - Experiment directory: runs/sand_task1_20251028_161037
+[2025-10-28 16:10:37,615][sandcli.train][INFO] - Loading training data...
+[2025-10-28 16:10:37,618][sandcli.train][INFO] - Loading features from 1736 samples...
+[2025-10-28 16:10:37,753][sandcli.train][INFO] - Loaded features: (1736, 720)
+[2025-10-28 16:10:37,753][sandcli.train][INFO] - Label distribution (before encoding):
+{'Healthy (5)': 680, 'ALS_None (4)': 488, 'ALS_Mild (3)': 360, 'ALS_Moderate (2)': 168, 'ALS_Severe (1)': 40}
+[2025-10-28 16:10:37,754][sandcli.train][INFO] - Loading test data...
+[2025-10-28 16:10:37,755][sandcli.train][INFO] - Loading features from 440 samples...
+[2025-10-28 16:10:37,779][sandcli.train][INFO] - Loaded features: (440, 720)
+[2025-10-28 16:10:37,779][sandcli.train][INFO] - Label distribution (before encoding):
+{'Healthy (5)': 176, 'ALS_None (4)': 120, 'ALS_Mild (3)': 96, 'ALS_Moderate (2)': 40, 'ALS_Severe (1)': 8}
+[2025-10-28 16:10:37,779][sandcli.train][INFO] - 
+Encoding labels...
+[2025-10-28 16:10:37,781][sandcli.train][INFO] - Label classes: ['ALS_Mild (3)' 'ALS_Moderate (2)' 'ALS_None (4)' 'ALS_Severe (1)'
+ 'Healthy (5)']
+[2025-10-28 16:10:37,781][sandcli.train][INFO] - Encoded train labels: [0 1 2 3 4]
+[2025-10-28 16:10:37,781][sandcli.train][INFO] - Label distribution (train): {4: 680, 2: 488, 0: 360, 1: 168, 3: 40}
+[2025-10-28 16:10:37,781][sandcli.train][INFO] - Label encoder saved to: runs/sand_task1_20251028_161037/label_encoder.pkl
+[2025-10-28 16:10:37,782][sandcli.train][WARNING] - ⚠️  imbalanced-learn not installed. Skipping SMOTE.
+[2025-10-28 16:10:37,782][sandcli.train][WARNING] -    Install with: pip install imbalanced-learn
+[2025-10-28 16:10:37,782][sandcli.train][INFO] - 
+Creating xgboost model...
+[2025-10-28 16:10:37,782][sandcli.train][INFO] - 
+⚖️  Using class weights for imbalanced data
+[2025-10-28 16:10:37,782][sandcli.train][INFO] -    Weight range: 0.51 - 8.68
+[2025-10-28 16:10:37,782][sandcli.train][INFO] - 
+🎭 ENSEMBLE MODE ACTIVATED
+[2025-10-28 16:10:37,783][sandcli.train][INFO] - 
+🎭 Creating Ensemble Model...
+[2025-10-28 16:10:37,868][sandcli.train][INFO] -    ✓ XGBoost (weight=3)
+[2025-10-28 16:10:37,868][sandcli.train][INFO] -    ✓ LightGBM (weight=3)
+[2025-10-28 16:10:37,868][sandcli.train][INFO] -    ✓ Random Forest (weight=2)
+[2025-10-28 16:10:37,868][sandcli.train][INFO] -    ✓ SVM RBF (weight=1)
+[2025-10-28 16:10:37,868][sandcli.train][INFO] -    Voting: Soft (weighted probabilities)
+[2025-10-28 16:10:37,868][sandcli.train][INFO] -    Class weighting: Balanced for all models
+[2025-10-28 16:10:37,868][sandcli.train][INFO] - 
+Training ensemble model...
+[2025-10-28 16:11:06,831][sandcli.train][INFO] - Ensemble model saved to: runs/sand_task1_20251028_161037/model.pkl
+[2025-10-28 16:11:06,831][sandcli.train][INFO] - 
+Evaluating on test set...
+[2025-10-28 16:11:07,239][sandcli.train][INFO] - 
+================================================================================
+[2025-10-28 16:11:07,239][sandcli.train][INFO] - TEST SET RESULTS
+[2025-10-28 16:11:07,239][sandcli.train][INFO] - ================================================================================
+[2025-10-28 16:11:07,239][sandcli.train][INFO] - Macro F1: 0.2740
+[2025-10-28 16:11:07,239][sandcli.train][INFO] - Accuracy: 0.3727
+[2025-10-28 16:11:07,239][sandcli.train][INFO] - 
+Per-class F1 scores:
+[2025-10-28 16:11:07,239][sandcli.train][INFO] -   ALS_Mild (3): 0.3017
+[2025-10-28 16:11:07,239][sandcli.train][INFO] -   ALS_Moderate (2): 0.3077
+[2025-10-28 16:11:07,239][sandcli.train][INFO] -   ALS_None (4): 0.2609
+[2025-10-28 16:11:07,239][sandcli.train][INFO] -   ALS_Severe (1): 0.0000
+[2025-10-28 16:11:07,239][sandcli.train][INFO] -   Healthy (5): 0.5000
+[2025-10-28 16:11:07,486][sandcli.utils.metrics][INFO] - Confusion matrix saved to runs/sand_task1_20251028_161037/confusion_matrix.png
+[2025-10-28 16:11:07,486][sandcli.train][INFO] - 
+✅ Confusion matrix saved to runs/sand_task1_20251028_161037/confusion_matrix.png
+[2025-10-28 16:11:07,507][sandcli.train][INFO] - ✅ Predictions saved to runs/sand_task1_20251028_161037/predictions.csv
+[2025-10-28 16:11:07,507][sandcli.train][INFO] - 
+⚠️  Feature importance not available for ensemble models
+[2025-10-28 16:11:07,507][sandcli.train][INFO] - 
+✅ Training complete!
+[2025-10-28 16:11:07,507][sandcli.train][INFO] - All results saved to: runs/sand_task1_20251028_161037
+[2025-10-28 16:11:07,514][__main__][INFO] - Command 'train' completed successfully!
