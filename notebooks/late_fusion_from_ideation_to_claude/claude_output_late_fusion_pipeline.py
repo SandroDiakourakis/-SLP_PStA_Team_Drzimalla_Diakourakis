@@ -837,7 +837,8 @@ class LateFusionPipeline:
 
     def __init__(self, feature_extractor: FeatureExtractor, model: LateFusionClassifier,
                  device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
-                 experiment_name: Optional[str] = None):
+                 experiment_name: Optional[str] = None,
+                 model_config: Optional[Dict] = None):  # 🆕 ADD THIS PARAMETER
         self.feature_extractor = feature_extractor
         self.model = model.to(device)
         self.device = device
@@ -866,6 +867,9 @@ class LateFusionPipeline:
             'feature_extractor': {
                 'type': feature_extractor.__class__.__name__,
                 'feature_dim': feature_extractor.get_feature_dim(),
+                'model_name': model_config.get('model_name') if model_config else None,
+                'layers': model_config.get('layers') if model_config else None,
+                'layer_fusion': model_config.get('layer_fusion') if model_config else None,
             },
             'model': {
                 'num_files': model.num_files,
@@ -1495,7 +1499,7 @@ class LateFusionPipeline:
         
         print(f"{'Accuracy':<30} {accuracy:<15.4f} {self._interpret_score(accuracy):<30}")
         print(f"{'Balanced Accuracy':<30} {balanced_acc:<15.4f} {'(Fair for imbalanced data)':<30}")
-        print(f"{'Cohen\'s Kappa':<30} {kappa:<15.4f} {self._interpret_kappa(kappa):<30}")
+        print(f"{'Cohens Kappa':<30} {kappa:<15.4f} {self._interpret_kappa(kappa):<30}")
         
         print(f"\n{'Macro-averaged Metrics':<30}")
         print(f"{'  Precision':<28} {precision_macro:<15.4f}")
@@ -1736,7 +1740,7 @@ def main():
     EPOCHS = 20
     DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
-    MODEL_NAME = "facebook/wav2vec2-large-960h" #"facebook/wav2vec2-base-960h"  # Change to "large" if using large model, "facebook/wav2vec2-large-960h"
+    MODEL_NAME = "facebook/wav2vec2-large-960h" #"facebook/wav2vec2-large-960h" #"facebook/wav2vec2-base-960h" "facebook/wav2vec2-large-960h"
     MODEL_SIZE = "large" if "large" in MODEL_NAME else "base"
 
     LAYERS = [9, 12, 15, 18]  # Extract from multiple layers
@@ -1787,7 +1791,7 @@ def main():
     logger.info("="*70)
     
     feature_extractor = Wav2Vec2Extractor(
-        model_name=MODEL_NAME,
+        model_name=MODEL_NAME, #"facebook/wav2vec2-base-960h" "facebook/wav2vec2-large-960h"
         pooling="mean",
         device=DEVICE,
         layers=LAYERS,
@@ -1880,11 +1884,18 @@ def main():
     logger.info("\n" + "="*70)
     logger.info("STEP 5: Creating pipeline and starting training...")
     logger.info("="*70)
+
+    model_config = {
+        'model_name': MODEL_NAME,
+        'layers': LAYERS,
+        'layer_fusion': LAYER_FUSION,
+    }
     
     pipeline = LateFusionPipeline(
         feature_extractor, 
         model, 
-        device=DEVICE
+        device=DEVICE,
+        model_config=model_config
     )
 
     logger.info("Starting training with gradient accumulation...")
