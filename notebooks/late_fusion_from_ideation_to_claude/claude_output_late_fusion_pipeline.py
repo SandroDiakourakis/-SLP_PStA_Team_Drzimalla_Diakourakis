@@ -2038,7 +2038,6 @@ def load_train_val_datasets(excel_path: Optional[Path] = None) -> Tuple[List[Aud
     
     return train_samples, val_samples
 
-
 def main():
     """Enhanced main function with all optimizations."""
 
@@ -2113,14 +2112,22 @@ def main():
     logger.info("\n" + "="*70)
     logger.info("AUDIO AUGMENTATION CONFIGURATION:")
     logger.info("="*70)
-    audio_augmentation = AudioAugmentation(**AUGMENTATION_CONFIG) if AUGMENTATION_CONFIG['enabled'] else None
-
-    logger.info("✓ Audio augmentation pipeline initialized")
-    logger.info("  - Time stretching: 0.9-1.1x")
-    logger.info("  - Pitch shifting: ±2 semitones")
-    logger.info("  - Noise addition: SNR 25-40 dB")
-    logger.info("  - Time masking: 30% probability, max 15% duration")
-    logger.info("  - Overall augmentation probability: 80%")
+    
+    # FIX: Filter out 'enabled' key before passing to AudioAugmentation
+    if AUGMENTATION_CONFIG['enabled']:
+        # Create a copy of the config without the 'enabled' key
+        augmentation_params = {k: v for k, v in AUGMENTATION_CONFIG.items() if k != 'enabled'}
+        audio_augmentation = AudioAugmentation(**augmentation_params)
+        logger.info("✓ Audio augmentation pipeline initialized")
+        logger.info(f"  - Time stretching: {augmentation_params['time_stretch_range']}")
+        logger.info(f"  - Pitch shifting: {augmentation_params['pitch_shift_range']} semitones")
+        logger.info(f"  - Noise addition: SNR {augmentation_params['noise_snr_range']} dB")
+        logger.info(f"  - Time masking: {augmentation_params['time_mask_prob']*100:.0f}% probability, max {augmentation_params['time_mask_max_ratio']*100:.0f}% duration")
+        logger.info(f"  - Overall augmentation probability: {augmentation_params['augmentation_prob']*100:.0f}%")
+    else:
+        audio_augmentation = None
+        logger.info("⚠️  Audio augmentation disabled")
+    
     logger.info("="*70 + "\n")
 
     # Initialize feature extractor with multi-layer support (#4)
@@ -2253,9 +2260,9 @@ def main():
     )
     logger.info("✓ Model created.")
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-    logger.info(f"Fusion strategy: {FUSION_STRATEGY}")  # 🆕 Log fusion strategy
+    logger.info(f"Fusion strategy: {FUSION_STRATEGY}")
 
-    # 5. Create pipeline and train
+    # Create pipeline and train
     logger.info("\n" + "="*70)
     logger.info("STEP 5: Creating pipeline and starting training...")
     logger.info("="*70)
@@ -2289,20 +2296,6 @@ def main():
         train_loader=train_loader,
         val_loader=val_loader,
         epochs=EPOCHS,
-        lr=5e-4,  # You can adjust this
-        weight_decay=1e-4,
-        max_grad_norm=1.0,
-        early_stopping_patience=10,  # Increased patience for longer training
-        early_stopping_metric="f1",
-        lambda_fair=0.0,  #0.01, 0.05, 0.01 # Disabled fairness regularization for max F1
-        accumulation_steps=ACCUMULATION_STEPS  # NEW: Gradient accumulation
-    )
-
-    # Train with configuration tracking
-    pipeline.train(
-        train_loader=train_loader,
-        val_loader=val_loader,
-        epochs=EPOCHS,
         lr=LEARNING_RATE,
         weight_decay=WEIGHT_DECAY,
         max_grad_norm=MAX_GRAD_NORM,
@@ -2330,7 +2323,7 @@ def main():
     logger.info("✓ Predictions completed.")
 
     # Class names based on labels
-    class_names = [f"Class_{i}" for i in range(NUM_CLASSES)]  # Adjust if you have specific names
+    class_names = [f"Class_{i}" for i in range(NUM_CLASSES)]
 
     # Print detailed evaluation report
     logger.info("\nGenerating detailed evaluation report...")
@@ -2399,7 +2392,6 @@ def main():
         gap = 0.6 - metrics['f1_macro']
         logger.info(f"📈 Gap to target: {gap:.4f} - Consider training longer or adjusting hyperparameters")
     logger.info("="*70 + "\n")
-
 
 if __name__ == "__main__":
     main()
