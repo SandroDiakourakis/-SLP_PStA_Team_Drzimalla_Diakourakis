@@ -296,6 +296,44 @@ class Wav2Vec2Extractor(FeatureExtractor):
 
         return fused
 
+    # ============================================================================
+    # Optimization #3: Fine-Tuning Support
+    # ============================================================================
+    
+    def enable_fine_tuning(self, num_layers: int = 4):
+        """Enable fine-tuning of top N transformer layers.
+        
+        Args:
+            num_layers: Number of top layers to unfreeze for fine-tuning
+        """
+        # First, freeze all parameters
+        for param in self.model.parameters():
+            param.requires_grad = False
+        
+        # Unfreeze top N encoder layers
+        total_layers = len(self.model.encoder.layers)
+        start_layer = max(0, total_layers - num_layers)
+        
+        for i in range(start_layer, total_layers):
+            for param in self.model.encoder.layers[i].parameters():
+                param.requires_grad = True
+        
+        # Also unfreeze layer weights if using weighted fusion
+        if self.layer_fusion == "weighted" and hasattr(self, 'layer_weights'):
+            self.layer_weights.requires_grad = True
+        
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        logger.info(f"✓ Fine-tuning enabled for layers {start_layer}-{total_layers-1}")
+        logger.info(f"  Trainable parameters: {trainable_params:,}")
+    
+    def get_trainable_parameters(self):
+        """Get trainable parameters for optimizer (fine-tuned layers)."""
+        params = [p for p in self.model.parameters() if p.requires_grad]
+        if self.layer_fusion == "weighted" and hasattr(self, 'layer_weights'):
+            if self.layer_weights.requires_grad:
+                params.append(self.layer_weights)
+        return params
+
     def get_feature_dim(self) -> int:
         return self._feature_dim
 
@@ -372,6 +410,44 @@ class HuBERTExtractor(FeatureExtractor):
                 raise ValueError(f"Unknown layer_fusion: {self.layer_fusion}")
 
         return fused
+    
+    # ============================================================================
+    # Optimization #3: Fine-Tuning Support
+    # ============================================================================
+    
+    def enable_fine_tuning(self, num_layers: int = 4):
+        """Enable fine-tuning of top N transformer layers.
+        
+        Args:
+            num_layers: Number of top layers to unfreeze for fine-tuning
+        """
+        # First, freeze all parameters
+        for param in self.model.parameters():
+            param.requires_grad = False
+        
+        # Unfreeze top N encoder layers
+        total_layers = len(self.model.encoder.layers)
+        start_layer = max(0, total_layers - num_layers)
+        
+        for i in range(start_layer, total_layers):
+            for param in self.model.encoder.layers[i].parameters():
+                param.requires_grad = True
+        
+        # Also unfreeze layer weights if using weighted fusion
+        if self.layer_fusion == "weighted" and hasattr(self, 'layer_weights'):
+            self.layer_weights.requires_grad = True
+        
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        logger.info(f"✓ Fine-tuning enabled for layers {start_layer}-{total_layers-1}")
+        logger.info(f"  Trainable parameters: {trainable_params:,}")
+    
+    def get_trainable_parameters(self):
+        """Get trainable parameters for optimizer (fine-tuned layers)."""
+        params = [p for p in self.model.parameters() if p.requires_grad]
+        if self.layer_fusion == "weighted" and hasattr(self, 'layer_weights'):
+            if self.layer_weights.requires_grad:
+                params.append(self.layer_weights)
+        return params
 
     def get_feature_dim(self) -> int:
         return self._feature_dim
@@ -449,9 +525,120 @@ class WavLMExtractor(FeatureExtractor):
                 raise ValueError(f"Unknown layer_fusion: {self.layer_fusion}")
 
         return fused
+    
+    # ============================================================================
+    # Optimization #3: Fine-Tuning Support
+    # ============================================================================
+    
+    def enable_fine_tuning(self, num_layers: int = 4):
+        """Enable fine-tuning of top N transformer layers.
+        
+        Args:
+            num_layers: Number of top layers to unfreeze for fine-tuning
+        """
+        # First, freeze all parameters
+        for param in self.model.parameters():
+            param.requires_grad = False
+        
+        # Unfreeze top N encoder layers
+        total_layers = len(self.model.encoder.layers)
+        start_layer = max(0, total_layers - num_layers)
+        
+        for i in range(start_layer, total_layers):
+            for param in self.model.encoder.layers[i].parameters():
+                param.requires_grad = True
+        
+        # Also unfreeze layer weights if using weighted fusion
+        if self.layer_fusion == "weighted" and hasattr(self, 'layer_weights'):
+            self.layer_weights.requires_grad = True
+        
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        logger.info(f"✓ Fine-tuning enabled for layers {start_layer}-{total_layers-1}")
+        logger.info(f"  Trainable parameters: {trainable_params:,}")
+    
+    def get_trainable_parameters(self):
+        """Get trainable parameters for optimizer (fine-tuned layers)."""
+        params = [p for p in self.model.parameters() if p.requires_grad]
+        if self.layer_fusion == "weighted" and hasattr(self, 'layer_weights'):
+            if self.layer_weights.requires_grad:
+                params.append(self.layer_weights)
+        return params
 
     def get_feature_dim(self) -> int:
         return self._feature_dim
+
+# ============================================================================
+# Optimization #5: Attention-Based Fusion
+# ============================================================================
+
+class AttentionFusion(nn.Module):
+    """Attention-based fusion mechanism for multi-file features.
+    
+    This module learns to weight the importance of different audio files
+    dynamically using multi-head self-attention.
+    """
+    
+    def __init__(self, feature_dim: int, num_files: int, num_heads: int = 4, dropout: float = 0.1):
+        """
+        Args:
+            feature_dim: Dimension of input features per file
+            num_files: Number of audio files
+            num_heads: Number of attention heads
+            dropout: Dropout probability
+        """
+        super().__init__()
+        
+        self.feature_dim = feature_dim
+        self.num_files = num_files
+        self.num_heads = num_heads
+        
+        # Multi-head self-attention
+        self.attention = nn.MultiheadAttention(
+            embed_dim=feature_dim,
+            num_heads=num_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+        
+        # Layer normalization
+        self.layer_norm = nn.LayerNorm(feature_dim)
+        
+        # Dropout
+        self.dropout = nn.Dropout(dropout)
+        
+        logger.info(f"AttentionFusion initialized:")
+        logger.info(f"  Feature dim: {feature_dim}")
+        logger.info(f"  Num files: {num_files}")
+        logger.info(f"  Num heads: {num_heads}")
+    
+    def forward(self, file_features: List[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Apply attention-based fusion to file features.
+        
+        Args:
+            file_features: List of tensors, each of shape (batch_size, feature_dim)
+        
+        Returns:
+            Tuple of (fused_features, attention_weights):
+                - fused_features: (batch_size, feature_dim)
+                - attention_weights: (batch_size, num_files, num_files)
+        """
+        # Stack files: (batch_size, num_files, feature_dim)
+        stacked = torch.stack(file_features, dim=1)
+        
+        # Apply multi-head self-attention
+        # Query, Key, Value are all the same (self-attention)
+        attended, attention_weights = self.attention(stacked, stacked, stacked)
+        
+        # Residual connection + Layer Norm
+        attended = self.layer_norm(attended + stacked)
+        
+        # Dropout
+        attended = self.dropout(attended)
+        
+        # Pool over files (mean pooling)
+        fused = attended.mean(dim=1)  # (batch_size, feature_dim)
+        
+        return fused, attention_weights
 
 # ============================================================================
 # Neural Network Components
@@ -540,7 +727,8 @@ class LateFusionClassifier(nn.Module):
     def __init__(self, input_dim: int, num_files: int, num_classes: int,
                  fusion_type: str = "feature", hidden_dim: int = 256,
                  file_processor_dim: int = 128, dropout: float = 0.3,
-                 shared_file_processor: bool = False):
+                 shared_file_processor: bool = False,
+                 fusion_strategy: str = "concat"):  # 🆕 Optimization #5
         """
         Args:
             input_dim: Dimension of features from neural extractor
@@ -551,6 +739,7 @@ class LateFusionClassifier(nn.Module):
             file_processor_dim: Output dimension of file processors
             dropout: Dropout probability
             shared_file_processor: If True, share weights across file processors
+            fusion_strategy: "concat" or "attention" (Optimization #5)
         """
         super().__init__()
 
@@ -558,6 +747,7 @@ class LateFusionClassifier(nn.Module):
         self.num_classes = num_classes
         self.fusion_type = fusion_type
         self.shared_file_processor = shared_file_processor
+        self.fusion_strategy = fusion_strategy  # 🆕 Optimization #5
 
         # Create file processors
         if fusion_type == "feature":
@@ -573,15 +763,33 @@ class LateFusionClassifier(nn.Module):
                     for _ in range(num_files)
                 ])
 
-            # Final classifier: Concatenate features + classify
-            fusion_dim = file_processor_dim * num_files
-            self.fusion_classifier = nn.Sequential(
-                nn.Linear(fusion_dim, hidden_dim),
-                nn.LayerNorm(hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout),
-                nn.Linear(hidden_dim, num_classes)
-            )
+            # 🆕 Optimization #5: Choose fusion strategy
+            if fusion_strategy == "attention":
+                # Attention-based fusion
+                self.attention_fusion = AttentionFusion(
+                    feature_dim=file_processor_dim,
+                    num_files=num_files,
+                    num_heads=4,
+                    dropout=dropout
+                )
+                # Classifier takes attended features
+                self.fusion_classifier = nn.Sequential(
+                    nn.Linear(file_processor_dim, hidden_dim),
+                    nn.LayerNorm(hidden_dim),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(hidden_dim, num_classes)
+                )
+            else:  # "concat" (original)
+                # Final classifier: Concatenate features + classify
+                fusion_dim = file_processor_dim * num_files
+                self.fusion_classifier = nn.Sequential(
+                    nn.Linear(fusion_dim, hidden_dim),
+                    nn.LayerNorm(hidden_dim),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(hidden_dim, num_classes)
+                )
 
         elif fusion_type == "decision":
             if shared_file_processor:
@@ -627,8 +835,17 @@ class LateFusionClassifier(nn.Module):
             else:
                 processed = [proc(feat) for proc, feat in zip(self.file_processors, file_features)]
 
-            # Concatenate and classify
-            fused = torch.cat(processed, dim=-1)
+            # 🆕 Optimization #5: Choose fusion strategy
+            if self.fusion_strategy == "attention":
+                # Attention-based fusion
+                fused, attention_weights = self.attention_fusion(processed)
+                # Store attention weights for visualization (optional)
+                self._last_attention_weights = attention_weights
+            else:  # "concat"
+                # Concatenate features
+                fused = torch.cat(processed, dim=-1)
+            
+            # Classify
             logits = self.fusion_classifier(fused)
 
         elif self.fusion_type == "decision":
@@ -917,7 +1134,12 @@ class LateFusionPipeline:
             'val_samples': len(val_loader.dataset) if val_loader else 0,
         }
         
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+        # 🆕 Optimization #3: Create optimizer with discriminative learning rates
+        optimizer = self._create_optimizer_with_discriminative_lr(
+            lr=lr,
+            lr_feature_extractor=1e-5,  # Small LR for fine-tuned layers
+            weight_decay=weight_decay
+        )
         
         # Scheduler mode depends on metric (max for f1/accuracy, min for loss)
         scheduler_mode = 'min' if early_stopping_metric == 'loss' else 'max'
@@ -1111,6 +1333,46 @@ class LateFusionPipeline:
         
         logger.info(f"\n✓ Training completed. Best model from epoch {best_epoch} loaded.")
         self._save_experiment_results(best_epoch, best_metric)
+
+    # ============================================================================
+    # Optimization #3: Discriminative Learning Rates for Fine-Tuning
+    # ============================================================================
+    
+    def _create_optimizer_with_discriminative_lr(self, lr: float, 
+                                                  lr_feature_extractor: float,
+                                                  weight_decay: float):
+        """Create optimizer with different learning rates for different parts.
+        
+        Args:
+            lr: Learning rate for classification head
+            lr_feature_extractor: Learning rate for fine-tuned feature extractor layers
+            weight_decay: Weight decay
+            
+        Returns:
+            Optimizer with parameter groups
+        """
+        param_groups = []
+        
+        # Get fine-tuned feature extractor parameters
+        if hasattr(self.feature_extractor, 'get_trainable_parameters'):
+            ft_params = self.feature_extractor.get_trainable_parameters()
+            if ft_params:
+                param_groups.append({
+                    'params': ft_params,
+                    'lr': lr_feature_extractor,
+                    'weight_decay': weight_decay
+                })
+                logger.info(f"Optimizer: Feature extractor params with LR={lr_feature_extractor}")
+        
+        # Classification head parameters (always trainable)
+        param_groups.append({
+            'params': self.model.parameters(),
+            'lr': lr,
+            'weight_decay': weight_decay
+        })
+        logger.info(f"Optimizer: Classification head params with LR={lr}")
+        
+        return torch.optim.AdamW(param_groups)
 
     def evaluate(self, data_loader: DataLoader) -> Tuple[float, float, float]:
         """Evaluate the model.
@@ -1737,16 +1999,23 @@ def main():
     # Configuration
     NUM_FILES = 8
     NUM_CLASSES = 5
-    EPOCHS = 20
+    EPOCHS = 40
     DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
-    # MODEL_NAME = "facebook/wav2vec2-large-960h" #"facebook/wav2vec2-base-960h" "facebook/wav2vec2-large-960h"
+    MODEL_NAME = "facebook/wav2vec2-large-960h" #"facebook/wav2vec2-base-960h" "facebook/wav2vec2-large-960h"
     # MODEL_NAME = "facebook/hubert-large-ll60k"
-    MODEL_NAME = "microsoft/wavlm-large"
+    # MODEL_NAME = "microsoft/wavlm-large"
     MODEL_SIZE = "large" if "large" in MODEL_NAME else "base"
 
     LAYERS = [6, 9, 12, 15, 18]  # Extract from multiple layers
-    LAYER_FUSION = "mean"  # "concat", "mean", or "weighted"
+    LAYER_FUSION = "concat"  # "concat", "mean", or "weighted"
+    
+    # 🆕 Optimization #3: Fine-Tuning Configuration
+    ENABLE_FINE_TUNING = True  # Enable/disable fine-tuning
+    NUM_LAYERS_TO_FINETUNE = 4  # Number of top layers to fine-tune
+    
+    # 🆕 Optimization #5: Fusion Strategy Configuration
+    FUSION_STRATEGY = "attention"  # "concat" or "attention"
 
     logger.info(f"\n{'='*70}")
     logger.info(f"LATE FUSION PIPELINE")
@@ -1792,13 +2061,13 @@ def main():
     logger.info("Initializing feature extractor with multi-layer extraction...")
     logger.info("="*70)
     
-    # feature_extractor = Wav2Vec2Extractor(
-    #     model_name=MODEL_NAME, #"facebook/wav2vec2-base-960h" "facebook/wav2vec2-large-960h"
-    #     pooling="mean",
-    #     device=DEVICE,
-    #     layers=LAYERS,
-    #     layer_fusion=LAYER_FUSION
-    # )
+    feature_extractor = Wav2Vec2Extractor(
+        model_name=MODEL_NAME, #"facebook/wav2vec2-base-960h" "facebook/wav2vec2-large-960h"
+        pooling="mean",
+        device=DEVICE,
+        layers=LAYERS,
+        layer_fusion=LAYER_FUSION
+    )
     
     # Alternative: HuBERT or WavLM with multi-layer
     # feature_extractor = HuBERTExtractor(
@@ -1809,13 +2078,21 @@ def main():
     #     layer_fusion=LAYER_FUSION
     # )
 
-    feature_extractor = WavLMExtractor(
-        model_name=MODEL_NAME, #"microsoft/wavlm-large",
-        pooling="mean",
-        device=DEVICE,
-        layers=LAYERS,
-        layer_fusion=LAYER_FUSION
-    )
+    # feature_extractor = WavLMExtractor(
+    #     model_name=MODEL_NAME, #"microsoft/wavlm-large",
+    #     pooling="mean",
+    #     device=DEVICE,
+    #     layers=LAYERS,
+    #     layer_fusion=LAYER_FUSION
+    # )
+    
+    # 🆕 Optimization #3: Enable Fine-Tuning
+    if ENABLE_FINE_TUNING:
+        logger.info("\n" + "="*70)
+        logger.info("OPTIMIZATION #3: ENABLING FINE-TUNING")
+        logger.info("="*70)
+        feature_extractor.enable_fine_tuning(num_layers=NUM_LAYERS_TO_FINETUNE)
+        logger.info("="*70 + "\n")
     
     logger.info("✓ Feature extractor initialized with multi-layer extraction")
     logger.info("="*70 + "\n")
@@ -1890,6 +2167,7 @@ def main():
         logger.info("✓ Dataloaders created\n")
 
     # Create model
+    # Create model
     logger.info("Creating model...")
     model = LateFusionClassifier(
         input_dim=feature_dim,
@@ -1899,10 +2177,12 @@ def main():
         hidden_dim=256,
         file_processor_dim=128,
         dropout=0.3,
-        shared_file_processor=False # True or False
+        shared_file_processor=False, # True or False
+        fusion_strategy=FUSION_STRATEGY  # 🆕 Optimization #5
     )
     logger.info("✓ Model created.")
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
+    logger.info(f"Fusion strategy: {FUSION_STRATEGY}")  # 🆕 Log fusion strategy
 
     # 5. Create pipeline and train
     logger.info("\n" + "="*70)
@@ -1930,7 +2210,7 @@ def main():
         lr=5e-4,  # You can adjust this
         weight_decay=1e-4,
         max_grad_norm=1.0,
-        early_stopping_patience=5,  # Increased patience for longer training
+        early_stopping_patience=10,  # Increased patience for longer training
         early_stopping_metric="f1",
         lambda_fair=0.0,  #0.01, 0.05, 0.01 # Disabled fairness regularization for max F1
         accumulation_steps=ACCUMULATION_STEPS  # NEW: Gradient accumulation
