@@ -1053,9 +1053,9 @@ class LateFusionPipeline:
     """Complete pipeline for late fusion classification."""
 
     def __init__(self, feature_extractor: FeatureExtractor, model: LateFusionClassifier,
-                 device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
-                 experiment_name: Optional[str] = None,
-                 model_config: Optional[Dict] = None):  # 🆕 ADD THIS PARAMETER
+                device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
+                experiment_name: Optional[str] = None,
+                model_config: Optional[Dict] = None):
         self.feature_extractor = feature_extractor
         self.model = model.to(device)
         self.device = device
@@ -1076,7 +1076,28 @@ class LateFusionPipeline:
         
         logger.info(f"Experiment directory: {self.experiment_dir}")
         
-        # Store configuration
+        # Extract ALL model architecture details
+        if hasattr(model, 'file_processors') and not model.shared_file_processor:
+            # Get details from first file processor
+            first_processor = model.file_processors[0]
+            input_dim = first_processor.network[0].in_features
+            hidden_dim = first_processor.network[0].out_features
+            file_processor_dim = first_processor.network[3].out_features
+        elif hasattr(model, 'file_processor'):
+            # Shared processor
+            input_dim = model.file_processor.network[0].in_features
+            hidden_dim = model.file_processor.network[0].out_features
+            file_processor_dim = model.file_processor.network[3].out_features
+        else:
+            # Fallback values
+            input_dim = feature_extractor.get_feature_dim()
+            hidden_dim = 256  # Default value
+            file_processor_dim = 128  # Default value
+        
+        # Get dropout value (assuming consistent across model)
+        dropout = 0.3  # Default, you could extract this from the model if needed
+        
+        # Store COMPLETE configuration
         self.config = {
             'experiment_name': self.experiment_name,
             'timestamp': datetime.now().isoformat(),
@@ -1085,24 +1106,39 @@ class LateFusionPipeline:
                 'type': feature_extractor.__class__.__name__,
                 'feature_dim': feature_extractor.get_feature_dim(),
                 'model_name': model_config.get('model_name') if model_config else None,
+                'pooling': getattr(feature_extractor, 'pooling', None),
                 'layers': model_config.get('layers') if model_config else None,
                 'layer_fusion': model_config.get('layer_fusion') if model_config else None,
             },
-            'model': {
+            'model_architecture': {
+                # Core parameters
+                'input_dim': input_dim,
                 'num_files': model.num_files,
                 'num_classes': model.num_classes,
                 'fusion_type': model.fusion_type,
+                
+                # Architecture details
+                'hidden_dim': hidden_dim,
+                'file_processor_dim': file_processor_dim,
+                'dropout': dropout,
                 'shared_file_processor': model.shared_file_processor,
+                'fusion_strategy': getattr(model, 'fusion_strategy', 'concat'),
+                
+                # Parameter counts
                 'total_parameters': sum(p.numel() for p in model.parameters()),
                 'trainable_parameters': sum(p.numel() for p in model.parameters() if p.requires_grad),
-            }
+            },
+            'audio_augmentation': None,  # Will be filled if augmentation is used
+            'fine_tuning': None,  # Will be filled if fine-tuning is enabled
         }
 
     def train(self, train_loader: DataLoader, val_loader: Optional[DataLoader] = None,
-              epochs: int = 10, lr: float = 1e-3, weight_decay: float = 1e-4, 
-              max_grad_norm: float = 1.0, early_stopping_patience: int = 5, 
-              early_stopping_metric: str = "f1", lambda_fair: float = 0.0,
-              accumulation_steps: int = 1):
+          epochs: int = 10, lr: float = 1e-3, weight_decay: float = 1e-4, 
+          max_grad_norm: float = 1.0, early_stopping_patience: int = 5, 
+          early_stopping_metric: str = "f1", lambda_fair: float = 0.0,
+          accumulation_steps: int = 1,
+          augmentation_config: Optional[Dict] = None,  # NEW
+          fine_tuning_config: Optional[Dict] = None):  # NEW:
         """
         Train the model with gradient accumulation support.
 
@@ -1117,8 +1153,18 @@ class LateFusionPipeline:
             early_stopping_metric: Metric to monitor ("f1", "accuracy", "loss")
             lambda_fair: Fairness regularization weight
             accumulation_steps: Number of steps to accumulate gradients
+            augmentation_config: Dictionary with augmentation settings
+            fine_tuning_config: Dictionary with fine-tuning settings
         """
-        # Store training hyperparameters
+        # Store augmentation config if provided
+        if augmentation_config:
+            self.config['audio_augmentation'] = augmentation_config
+        
+        # Store fine-tuning config if provided
+        if fine_tuning_config:
+            self.config['fine_tuning'] = fine_tuning_config
+        
+        # Store training hyperparameters (existing code)
         self.config['training'] = {
             'epochs': epochs,
             'lr': lr,
@@ -2017,6 +2063,32 @@ def main():
     # 🆕 Optimization #5: Fusion Strategy Configuration
     FUSION_STRATEGY = "attention"  # "concat" or "attention"
 
+    # Model Architecture Configuration
+    HIDDEN_DIM = 256
+    FILE_PROCESSOR_DIM = 128
+    DROPOUT = 0.3
+    SHARED_FILE_PROCESSOR = False
+    FUSION_TYPE = "feature"
+
+    # Training Configuration
+    LEARNING_RATE = 5e-4
+    WEIGHT_DECAY = 1e-4
+    MAX_GRAD_NORM = 1.0
+    EARLY_STOPPING_PATIENCE = 10
+    EARLY_STOPPING_METRIC = "f1"
+    LAMBDA_FAIR = 0.0
+
+    # Augmentation Configuration
+    AUGMENTATION_CONFIG = {
+        'enabled': True,
+        'time_stretch_range': (0.9, 1.1),
+        'pitch_shift_range': (-2, 2),
+        'noise_snr_range': (25, 40),
+        'time_mask_prob': 0.3,
+        'time_mask_max_ratio': 0.15,
+        'augmentation_prob': 0.8
+    }
+
     logger.info(f"\n{'='*70}")
     logger.info(f"LATE FUSION PIPELINE")
     logger.info(f"{'='*70}")
@@ -2041,14 +2113,8 @@ def main():
     logger.info("\n" + "="*70)
     logger.info("AUDIO AUGMENTATION CONFIGURATION:")
     logger.info("="*70)
-    audio_augmentation = AudioAugmentation(
-        time_stretch_range=(0.9, 1.1),
-        pitch_shift_range=(-2, 2),
-        noise_snr_range=(25, 40),
-        time_mask_prob=0.3,
-        time_mask_max_ratio=0.15,
-        augmentation_prob=0.8
-    )
+    audio_augmentation = AudioAugmentation(**AUGMENTATION_CONFIG) if AUGMENTATION_CONFIG['enabled'] else None
+
     logger.info("✓ Audio augmentation pipeline initialized")
     logger.info("  - Time stretching: 0.9-1.1x")
     logger.info("  - Pitch shifting: ±2 semitones")
@@ -2087,7 +2153,13 @@ def main():
     # )
     
     # 🆕 Optimization #3: Enable Fine-Tuning
+    fine_tuning_config = None
     if ENABLE_FINE_TUNING:
+        fine_tuning_config = {
+            'enabled': True,
+            'num_layers': NUM_LAYERS_TO_FINETUNE,
+            'lr_feature_extractor': 1e-5
+        }
         logger.info("\n" + "="*70)
         logger.info("OPTIMIZATION #3: ENABLING FINE-TUNING")
         logger.info("="*70)
@@ -2167,18 +2239,17 @@ def main():
         logger.info("✓ Dataloaders created\n")
 
     # Create model
-    # Create model
     logger.info("Creating model...")
     model = LateFusionClassifier(
-        input_dim=feature_dim,
+        input_dim=feature_extractor.get_feature_dim(),
         num_files=NUM_FILES,
         num_classes=NUM_CLASSES,
-        fusion_type="feature", # "feature" or "decision"
-        hidden_dim=256,
-        file_processor_dim=128,
-        dropout=0.3,
-        shared_file_processor=False, # True or False
-        fusion_strategy=FUSION_STRATEGY  # 🆕 Optimization #5
+        fusion_type=FUSION_TYPE,
+        hidden_dim=HIDDEN_DIM,
+        file_processor_dim=FILE_PROCESSOR_DIM,
+        dropout=DROPOUT,
+        shared_file_processor=SHARED_FILE_PROCESSOR,
+        fusion_strategy=FUSION_STRATEGY 
     )
     logger.info("✓ Model created.")
     logger.info(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -2189,10 +2260,21 @@ def main():
     logger.info("STEP 5: Creating pipeline and starting training...")
     logger.info("="*70)
 
+    # Complete model configuration dictionary
     model_config = {
         'model_name': MODEL_NAME,
+        'model_size': MODEL_SIZE,
         'layers': LAYERS,
         'layer_fusion': LAYER_FUSION,
+        'pooling': 'mean',
+        'fusion_type': FUSION_TYPE,
+        'hidden_dim': HIDDEN_DIM,
+        'file_processor_dim': FILE_PROCESSOR_DIM,
+        'dropout': DROPOUT,
+        'shared_file_processor': SHARED_FILE_PROCESSOR,
+        'fusion_strategy': FUSION_STRATEGY,
+        'num_files': NUM_FILES,
+        'num_classes': NUM_CLASSES,
     }
     
     pipeline = LateFusionPipeline(
@@ -2214,6 +2296,22 @@ def main():
         early_stopping_metric="f1",
         lambda_fair=0.0,  #0.01, 0.05, 0.01 # Disabled fairness regularization for max F1
         accumulation_steps=ACCUMULATION_STEPS  # NEW: Gradient accumulation
+    )
+
+    # Train with configuration tracking
+    pipeline.train(
+        train_loader=train_loader,
+        val_loader=val_loader,
+        epochs=EPOCHS,
+        lr=LEARNING_RATE,
+        weight_decay=WEIGHT_DECAY,
+        max_grad_norm=MAX_GRAD_NORM,
+        early_stopping_patience=EARLY_STOPPING_PATIENCE,
+        early_stopping_metric=EARLY_STOPPING_METRIC,
+        lambda_fair=LAMBDA_FAIR, #0.01, 0.05, 0.01 # Disabled fairness regularization for max F1
+        accumulation_steps=ACCUMULATION_STEPS,
+        augmentation_config=AUGMENTATION_CONFIG if audio_augmentation else None,
+        fine_tuning_config=fine_tuning_config
     )
     logger.info("✓ Training completed.")
 
