@@ -1740,11 +1740,13 @@ def main():
     EPOCHS = 20
     DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
-    MODEL_NAME = "facebook/wav2vec2-large-960h" #"facebook/wav2vec2-large-960h" #"facebook/wav2vec2-base-960h" "facebook/wav2vec2-large-960h"
+    # MODEL_NAME = "facebook/wav2vec2-large-960h" #"facebook/wav2vec2-base-960h" "facebook/wav2vec2-large-960h"
+    # MODEL_NAME = "facebook/hubert-large-ll60k"
+    MODEL_NAME = "microsoft/wavlm-large"
     MODEL_SIZE = "large" if "large" in MODEL_NAME else "base"
 
-    LAYERS = [9, 12, 15, 18]  # Extract from multiple layers
-    LAYER_FUSION = "weighted"  # "concat", "mean", or "weighted"
+    LAYERS = [6, 9, 12, 15, 18]  # Extract from multiple layers
+    LAYER_FUSION = "mean"  # "concat", "mean", or "weighted"
 
     logger.info(f"\n{'='*70}")
     logger.info(f"LATE FUSION PIPELINE")
@@ -1790,13 +1792,13 @@ def main():
     logger.info("Initializing feature extractor with multi-layer extraction...")
     logger.info("="*70)
     
-    feature_extractor = Wav2Vec2Extractor(
-        model_name=MODEL_NAME, #"facebook/wav2vec2-base-960h" "facebook/wav2vec2-large-960h"
-        pooling="mean",
-        device=DEVICE,
-        layers=LAYERS,
-        layer_fusion=LAYER_FUSION
-    )
+    # feature_extractor = Wav2Vec2Extractor(
+    #     model_name=MODEL_NAME, #"facebook/wav2vec2-base-960h" "facebook/wav2vec2-large-960h"
+    #     pooling="mean",
+    #     device=DEVICE,
+    #     layers=LAYERS,
+    #     layer_fusion=LAYER_FUSION
+    # )
     
     # Alternative: HuBERT or WavLM with multi-layer
     # feature_extractor = HuBERTExtractor(
@@ -1807,13 +1809,13 @@ def main():
     #     layer_fusion=LAYER_FUSION
     # )
 
-    # feature_extractor = WavLMExtractor(
-    #     model_name=MODEL_NAME, #"microsoft/wavlm-large",
-    #     pooling="mean",
-    #     device=DEVICE,
-    #     layers=LAYERS,
-    #     layer_fusion=LAYER_FUSION
-    # )
+    feature_extractor = WavLMExtractor(
+        model_name=MODEL_NAME, #"microsoft/wavlm-large",
+        pooling="mean",
+        device=DEVICE,
+        layers=LAYERS,
+        layer_fusion=LAYER_FUSION
+    )
     
     logger.info("✓ Feature extractor initialized with multi-layer extraction")
     logger.info("="*70 + "\n")
@@ -1847,23 +1849,45 @@ def main():
     )
 
     # Create dataloaders with optimized settings
-    train_loader = DataLoader(
-        train_dataset, 
-        batch_size=BATCH_SIZE,
-        shuffle=True, 
-        collate_fn=collate_fn,
-        num_workers=2 if DEVICE != "mps" else 0,  # MPS doesn't support multiprocessing well
-        pin_memory=True if DEVICE == "cuda" else False
-    )
-    val_loader = DataLoader(
-        val_dataset, 
-        batch_size=BATCH_SIZE,
-        shuffle=False, 
-        collate_fn=collate_fn,
-        num_workers=2 if DEVICE != "mps" else 0,
-        pin_memory=True if DEVICE == "cuda" else False
-    )
-    logger.info("✓ Dataloaders created\n")
+    if DEVICE == "cuda":
+        # CUDA has issues with multiprocessing when model is used in dataset
+        # Since feature extraction happens in __getitem__, we need single-process
+        train_loader = DataLoader(
+            train_dataset, 
+            batch_size=BATCH_SIZE,
+            shuffle=True, 
+            collate_fn=collate_fn,
+            num_workers=0,  # IMPORTANT: Single process for CUDA
+            pin_memory=False  # IMPORTANT: Disable pin_memory (data already on GPU)
+        )
+        val_loader = DataLoader(
+            val_dataset, 
+            batch_size=BATCH_SIZE,
+            shuffle=False, 
+            collate_fn=collate_fn,
+            num_workers=0,  # IMPORTANT: Single process for CUDA
+            pin_memory=False  # IMPORTANT: Disable pin_memory
+        )
+        logger.info("✓ Dataloaders created (CUDA single-process mode)")
+    else:
+        # MPS/CPU can use multiprocessing
+        train_loader = DataLoader(
+            train_dataset, 
+            batch_size=BATCH_SIZE,
+            shuffle=True, 
+            collate_fn=collate_fn,
+            num_workers=2 if DEVICE != "mps" else 0,
+            pin_memory=True if DEVICE == "cuda" else False
+        )
+        val_loader = DataLoader(
+            val_dataset, 
+            batch_size=BATCH_SIZE,
+            shuffle=False, 
+            collate_fn=collate_fn,
+            num_workers=2 if DEVICE != "mps" else 0,
+            pin_memory=True if DEVICE == "cuda" else False
+        )
+        logger.info("✓ Dataloaders created\n")
 
     # Create model
     logger.info("Creating model...")
