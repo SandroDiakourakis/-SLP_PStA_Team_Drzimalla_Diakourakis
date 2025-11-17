@@ -1,0 +1,50 @@
+{
+  "experiment_name": "experiment_20251115_102545",
+  "timestamp": "2025-11-15T10:25:45.173513",
+  "device": "cuda",
+  "feature_extractor": {
+    "type": "Wav2Vec2Extractor",
+    "feature_dim": 5120,
+    "model_name": "facebook/wav2vec2-large-960h",
+    "layers": [
+      6,
+      9,
+      12,
+      15,
+      18
+    ],
+    "layer_fusion": "concat"
+  },
+  "model": {
+    "num_files": 8,
+    "num_classes": 5,
+    "fusion_type": "feature",
+    "shared_file_processor": false,
+    "total_parameters": 11021317,
+    "trainable_parameters": 11021317
+  },
+  "training": {
+    "epochs": 20,
+    "lr": 0.0005,
+    "weight_decay": 0.0001,
+    "max_grad_norm": 1.0,
+    "early_stopping_patience": 5,
+    "early_stopping_metric": "f1",
+    "lambda_fair": 0.0,
+    "physical_batch_size": 24,
+    "accumulation_steps": 1,
+    "effective_batch_size": 24,
+    "train_samples": 219,
+    "val_samples": 53
+  },
+  "results": {
+    "best_epoch": 3,
+    "best_metric": 0.4844277861069465,
+    "final_train_loss": 1.0033611893653869,
+    "final_train_acc": 0.4200913242009132,
+    "final_train_f1": 0.3986407499884589,
+    "final_val_loss": 0.9610353310902914,
+    "final_val_acc": 0.5283018867924528,
+    "final_val_f1": 0.4075324675324675
+  }
+}

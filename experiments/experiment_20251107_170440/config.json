@@ -1,0 +1,36 @@
+{
+  "experiment_name": "experiment_20251107_170440",
+  "timestamp": "2025-11-07T17:04:40.674817",
+  "device": "mps",
+  "feature_extractor": {
+    "type": "HuBERTExtractor",
+    "feature_dim": 1024
+  },
+  "model": {
+    "num_files": 8,
+    "num_classes": 5,
+    "fusion_type": "feature",
+    "shared_file_processor": false,
+    "total_parameters": 2632709,
+    "trainable_parameters": 2632709
+  },
+  "training": {
+    "epochs": 20,
+    "lr": 0.0005,
+    "weight_decay": 0.0001,
+    "max_grad_norm": 1.0,
+    "early_stopping_patience": 5,
+    "early_stopping_metric": "f1",
+    "batch_size": 4,
+    "train_samples": 219,
+    "val_samples": 53
+  },
+  "results": {
+    "best_epoch": 7,
+    "best_metric": 0.46845238095238095,
+    "final_train_loss": 0.8030188479206779,
+    "final_train_acc": 0.6027397260273972,
+    "final_val_loss": 1.0161051686320985,
+    "final_val_acc": 0.5471698113207547
+  }
+}

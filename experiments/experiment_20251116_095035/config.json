@@ -1,0 +1,50 @@
+{
+  "experiment_name": "experiment_20251116_095035",
+  "timestamp": "2025-11-16T09:50:35.185025",
+  "device": "cuda",
+  "feature_extractor": {
+    "type": "WavLMExtractor",
+    "feature_dim": 5120,
+    "model_name": "microsoft/wavlm-large",
+    "layers": [
+      6,
+      9,
+      12,
+      15,
+      18
+    ],
+    "layer_fusion": "concat"
+  },
+  "model": {
+    "num_files": 8,
+    "num_classes": 5,
+    "fusion_type": "feature",
+    "shared_file_processor": false,
+    "total_parameters": 11021317,
+    "trainable_parameters": 11021317
+  },
+  "training": {
+    "epochs": 20,
+    "lr": 0.0005,
+    "weight_decay": 0.0001,
+    "max_grad_norm": 1.0,
+    "early_stopping_patience": 5,
+    "early_stopping_metric": "f1",
+    "lambda_fair": 0.0,
+    "physical_batch_size": 24,
+    "accumulation_steps": 1,
+    "effective_batch_size": 24,
+    "train_samples": 219,
+    "val_samples": 53
+  },
+  "results": {
+    "best_epoch": 5,
+    "best_metric": 0.45696941540843977,
+    "final_train_loss": 1.1017094492912292,
+    "final_train_acc": 0.410958904109589,
+    "final_train_f1": 0.3476204049469697,
+    "final_val_loss": 1.1273894309997559,
+    "final_val_acc": 0.39622641509433965,
+    "final_val_f1": 0.39816991483762115
+  }
+}

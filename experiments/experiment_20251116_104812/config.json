@@ -1,0 +1,50 @@
+{
+  "experiment_name": "experiment_20251116_104812",
+  "timestamp": "2025-11-16T10:48:12.781116",
+  "device": "mps",
+  "feature_extractor": {
+    "type": "WavLMExtractor",
+    "feature_dim": 1024,
+    "model_name": "microsoft/wavlm-large",
+    "layers": [
+      6,
+      9,
+      12,
+      15,
+      18
+    ],
+    "layer_fusion": "mean"
+  },
+  "model": {
+    "num_files": 8,
+    "num_classes": 5,
+    "fusion_type": "feature",
+    "shared_file_processor": false,
+    "total_parameters": 2632709,
+    "trainable_parameters": 2632709
+  },
+  "training": {
+    "epochs": 20,
+    "lr": 0.0005,
+    "weight_decay": 0.0001,
+    "max_grad_norm": 1.0,
+    "early_stopping_patience": 5,
+    "early_stopping_metric": "f1",
+    "lambda_fair": 0.0,
+    "physical_batch_size": 12,
+    "accumulation_steps": 2,
+    "effective_batch_size": 24,
+    "train_samples": 219,
+    "val_samples": 53
+  },
+  "results": {
+    "best_epoch": 16,
+    "best_metric": 0.46981342244500135,
+    "final_train_loss": 0.8535581356600711,
+    "final_train_acc": 0.5159817351598174,
+    "final_train_f1": 0.5771331250240527,
+    "final_val_loss": 1.0580849409103394,
+    "final_val_acc": 0.49056603773584906,
+    "final_val_f1": 0.4118614718614719
+  }
+}

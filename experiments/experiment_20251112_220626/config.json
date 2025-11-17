@@ -1,0 +1,41 @@
+{
+  "experiment_name": "experiment_20251112_220626",
+  "timestamp": "2025-11-12T22:06:26.507641",
+  "device": "mps",
+  "feature_extractor": {
+    "type": "WavLMExtractor",
+    "feature_dim": 1024
+  },
+  "model": {
+    "num_files": 8,
+    "num_classes": 5,
+    "fusion_type": "feature",
+    "shared_file_processor": false,
+    "total_parameters": 2632709,
+    "trainable_parameters": 2632709
+  },
+  "training": {
+    "epochs": 20,
+    "lr": 0.0005,
+    "weight_decay": 0.0001,
+    "max_grad_norm": 1.0,
+    "early_stopping_patience": 5,
+    "early_stopping_metric": "f1",
+    "lambda_fair": 0.0,
+    "physical_batch_size": 12,
+    "accumulation_steps": 2,
+    "effective_batch_size": 24,
+    "train_samples": 219,
+    "val_samples": 53
+  },
+  "results": {
+    "best_epoch": 3,
+    "best_metric": 0.43816634715635827,
+    "final_train_loss": 1.0824612096736306,
+    "final_train_acc": 0.4337899543378995,
+    "final_train_f1": 0.3317878879755648,
+    "final_val_loss": 1.1884679555892945,
+    "final_val_acc": 0.49056603773584906,
+    "final_val_f1": 0.3420083184789068
+  }
+}
