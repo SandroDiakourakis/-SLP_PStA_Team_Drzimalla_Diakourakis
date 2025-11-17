@@ -264,6 +264,68 @@ class FileProcessorWithDecision(nn.Module):
         logits = self.classifier(processed)
         return processed, logits
 
+class BatchSizeOptimizer:
+    """Helper to determine optimal batch size for different hardware."""
+    
+    @staticmethod
+    def get_recommended_batch_size(device: str, model_size: str = "base") -> Tuple[int, int]:
+        """
+        Get recommended batch size and accumulation steps.
+        
+        Args:
+            device: "cuda", "mps", or "cpu"
+            model_size: "base" or "large"
+            
+        Returns:
+            (batch_size, accumulation_steps) tuple
+        """
+        if device == "mps":
+            # M2 Max with 64GB RAM - optimized for MPS
+            if model_size == "large":
+                # Large models (wav2vec2-large, hubert-large, wavlm-large)
+                # MPS can handle moderate batches with multi-layer extraction
+                return 12, 2  # Effective batch size: 24
+            else:
+                # Base models
+                return 16, 2  # Effective batch size: 32
+                
+        elif device == "cuda":
+            # Dedicated GPU recommendations
+            if model_size == "large":
+                # Assume modern GPU (RTX 3090, A100, etc.)
+                return 24, 1  # Can handle larger batches
+            else:
+                return 32, 1
+                
+        else:  # CPU
+            # CPU training is slow, use smaller batches
+            return 4, 4  # Effective batch size: 16
+    @staticmethod
+    def log_batch_config(batch_size: int, accumulation_steps: int, device: str):
+        """Log batch configuration details."""
+        effective_batch = batch_size * accumulation_steps
+        
+        logger.info(f"\n{'='*70}")
+        logger.info(f"BATCH SIZE CONFIGURATION:")
+        logger.info(f"{'='*70}")
+        logger.info(f"  Device: {device.upper()}")
+        logger.info(f"  Physical batch size: {batch_size}")
+        logger.info(f"  Gradient accumulation steps: {accumulation_steps}")
+        logger.info(f"  Effective batch size: {effective_batch}")
+        
+        if device == "mps":
+            logger.info(f"\n  ✓ Optimized for M2 Max (64GB RAM)")
+            logger.info(f"    - MPS backend used for GPU acceleration")
+            logger.info(f"    - Batch size balanced for memory and speed")
+        elif device == "cuda":
+            logger.info(f"\n  ✓ Using dedicated GPU")
+            logger.info(f"    - Larger batches for faster training")
+        else:
+            logger.info(f"\n  ⚠️  Using CPU - training will be slow")
+            logger.info(f"    - Consider using a GPU for faster training")
+        
+        logger.info(f"{'='*70}\n")
+
 
 class LateFusionClassifier(nn.Module):
     """
