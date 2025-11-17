@@ -1053,9 +1053,9 @@ class LateFusionPipeline:
     """Complete pipeline for late fusion classification."""
 
     def __init__(self, feature_extractor: FeatureExtractor, model: LateFusionClassifier,
-                device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
-                experiment_name: Optional[str] = None,
-                model_config: Optional[Dict] = None):
+            device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
+            experiment_name: Optional[str] = None,
+            model_config: Optional[Dict] = None):
         self.feature_extractor = feature_extractor
         self.model = model.to(device)
         self.device = device
@@ -1077,25 +1077,50 @@ class LateFusionPipeline:
         logger.info(f"Experiment directory: {self.experiment_dir}")
         
         # Extract ALL model architecture details
+        # FIXED: Correct indices for accessing Linear layers in Sequential
+        # FileProcessor network structure:
+        # [0] Linear(input_dim, hidden_dim)
+        # [1] LayerNorm(hidden_dim)
+        # [2] ReLU()
+        # [3] Dropout(p)
+        # [4] Linear(hidden_dim, file_processor_dim)  <-- This is what we need
+        # [5] LayerNorm(file_processor_dim)
+        # [6] ReLU()
+        # [7] Dropout(p)
+        
         if hasattr(model, 'file_processors') and not model.shared_file_processor:
             # Get details from first file processor
             first_processor = model.file_processors[0]
             input_dim = first_processor.network[0].in_features
             hidden_dim = first_processor.network[0].out_features
-            file_processor_dim = first_processor.network[3].out_features
+            file_processor_dim = first_processor.network[4].out_features
         elif hasattr(model, 'file_processor'):
             # Shared processor
             input_dim = model.file_processor.network[0].in_features
             hidden_dim = model.file_processor.network[0].out_features
-            file_processor_dim = model.file_processor.network[3].out_features
+            file_processor_dim = model.file_processor.network[4].out_features
         else:
-            # Fallback values
+            # Fallback values from config or defaults
             input_dim = feature_extractor.get_feature_dim()
-            hidden_dim = 256  # Default value
-            file_processor_dim = 128  # Default value
+            hidden_dim = model_config.get('hidden_dim', 256) if model_config else 256
+            file_processor_dim = model_config.get('file_processor_dim', 128) if model_config else 128
         
-        # Get dropout value (assuming consistent across model)
-        dropout = 0.3  # Default, you could extract this from the model if needed
+        # Get dropout value - extract from actual dropout layer
+        dropout = 0.3  # Default
+        try:
+            if hasattr(model, 'file_processors') and not model.shared_file_processor:
+                if len(model.file_processors) > 0:
+                    # network[3] is the first Dropout layer
+                    dropout_layer = model.file_processors[0].network[3]
+                    if isinstance(dropout_layer, nn.Dropout) and hasattr(dropout_layer, 'p'):
+                        dropout = dropout_layer.p
+            elif hasattr(model, 'file_processor'):
+                dropout_layer = model.file_processor.network[3]
+                if isinstance(dropout_layer, nn.Dropout) and hasattr(dropout_layer, 'p'):
+                    dropout = dropout_layer.p
+        except (IndexError, AttributeError):
+            # If extraction fails, use default or config value
+            dropout = model_config.get('dropout', 0.3) if model_config else 0.3
         
         # Store COMPLETE configuration
         self.config = {
@@ -1130,7 +1155,7 @@ class LateFusionPipeline:
             },
             'audio_augmentation': None,  # Will be filled if augmentation is used
             'fine_tuning': None,  # Will be filled if fine-tuning is enabled
-        }
+    }
 
     def train(self, train_loader: DataLoader, val_loader: Optional[DataLoader] = None,
           epochs: int = 10, lr: float = 1e-3, weight_decay: float = 1e-4, 
@@ -1629,14 +1654,23 @@ class LateFusionPipeline:
         """Save model checkpoint."""
         if not Path(path).is_absolute():
             path = self.experiment_dir / path
+
+        if hasattr(self.model, 'file_processors') and not self.model.shared_file_processor:
+            input_dim = self.model.file_processors[0].network[0].in_features
+        elif hasattr(self.model, 'file_processor'):
+            input_dim = self.model.file_processor.network[0].in_features
+        else:
+            input_dim = self.feature_extractor.get_feature_dim()
         
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'model_config': {
-                'input_dim': self.model.file_processors[0].network[0].in_features if not self.model.shared_file_processor else self.model.file_processor.network[0].in_features,
+                'input_dim': input_dim,
                 'num_files': self.model.num_files,
                 'num_classes': self.model.num_classes,
                 'fusion_type': self.model.fusion_type,
+                'fusion_strategy': getattr(self.model, 'fusion_strategy', 'concat'),
+                'shared_file_processor': self.model.shared_file_processor,
             },
             'train_history': self.train_history,
             'experiment_name': self.experiment_name,
@@ -2053,7 +2087,7 @@ def main():
     MODEL_SIZE = "large" if "large" in MODEL_NAME else "base"
 
     LAYERS = [6, 9, 12, 15, 18]  # Extract from multiple layers
-    LAYER_FUSION = "concat"  # "concat", "mean", or "weighted"
+    LAYER_FUSION = "weighted"  # "concat", "mean", or "weighted"
     
     # 🆕 Optimization #3: Fine-Tuning Configuration
     ENABLE_FINE_TUNING = True  # Enable/disable fine-tuning
