@@ -27,3 +27,6 @@ sandcli/utils/__pycache__/__init__.cpython-313.pyc
 sandcli/utils/__pycache__/audio.cpython-313.pyc
 sandcli/utils/__pycache__/metrics.cpython-313.pyc
 sandcli/utils/__pycache__/visualization.cpython-313.pyc
+notebooks/late_fusion_from_ideation_to_claude/venv/
+experiments/
+venv/
