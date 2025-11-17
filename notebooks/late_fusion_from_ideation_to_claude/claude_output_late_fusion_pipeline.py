@@ -2170,6 +2170,7 @@ def main():
     # MODEL_NAME = "facebook/hubert-large-ll60k"
     # MODEL_NAME = "microsoft/wavlm-large"
     MODEL_SIZE = "large" if "large" in MODEL_NAME else "base"
+    POOLING = "first-last"  # "mean", "max", "first", "last", "first-last", "first-last-window"
 
     LAYERS = [6, 9, 12, 15, 18]  # Extract from multiple layers
     LAYER_FUSION = "concat"  # "concat", "mean", or "weighted" # wav2wec (fertig), hubert (concat)
@@ -2255,7 +2256,7 @@ def main():
     
     feature_extractor = Wav2Vec2Extractor(
         model_name=MODEL_NAME, #"facebook/wav2vec2-base-960h" "facebook/wav2vec2-large-960h"
-        pooling="mean",
+        pooling=POOLING,
         device=DEVICE,
         layers=LAYERS,
         layer_fusion=LAYER_FUSION
@@ -2264,7 +2265,7 @@ def main():
     # Alternative: HuBERT or WavLM with multi-layer
     # feature_extractor = HuBERTExtractor(
     #     model_name=MODEL_NAME, #"facebook/hubert-large-ll60k",
-    #     pooling="mean",
+    #     pooling=POOLING,
     #     device=DEVICE,
     #     layers=LAYERS,
     #     layer_fusion=LAYER_FUSION
@@ -2272,7 +2273,7 @@ def main():
 
     # feature_extractor = WavLMExtractor(
     #     model_name=MODEL_NAME, #"microsoft/wavlm-large",
-    #     pooling="mean",
+    #     pooling=POOLING,
     #     device=DEVICE,
     #     layers=LAYERS,
     #     layer_fusion=LAYER_FUSION
@@ -2392,7 +2393,7 @@ def main():
         'model_size': MODEL_SIZE,
         'layers': LAYERS,
         'layer_fusion': LAYER_FUSION,
-        'pooling': 'mean',
+        'pooling': POOLING,
         'fusion_type': FUSION_TYPE,
         'hidden_dim': HIDDEN_DIM,
         'file_processor_dim': FILE_PROCESSOR_DIM,
