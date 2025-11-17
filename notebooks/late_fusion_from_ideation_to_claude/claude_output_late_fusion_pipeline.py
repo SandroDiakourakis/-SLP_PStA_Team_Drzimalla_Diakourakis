@@ -219,7 +219,14 @@ class Wav2Vec2Extractor(FeatureExtractor):
         """
         Args:
             model_name: HuggingFace model name
-            pooling: Pooling strategy ("mean", "max", "first", "last")
+            pooling: Pooling strategy ("mean", "max", "first", "last", "first-last", "first-last-window")
+                - "mean": Average features over time dimension
+                - "max": Max pooling over time dimension
+                - "first": Take first frame features
+                - "last": Take last frame features
+                - "first-last": Concatenate first and last frame features (doubles output dimension)
+                              Clinical use case: Capture voice degradation in ALS patients
+                - "first-last-window": Concatenate first and last 10% window features (doubles output dimension)
             device: Device to run model on
             layers: List of layer indices to extract (e.g., [9, 12, 15, 18])
                    If None, uses default [12] for backward compatibility
@@ -235,12 +242,16 @@ class Wav2Vec2Extractor(FeatureExtractor):
         self.model = Wav2Vec2Model.from_pretrained(model_name).to(device)
         self.model.eval()
         
-        # Calculate feature dimension based on layer fusion
+        # Calculate feature dimension based on layer fusion and pooling
         base_dim = self.model.config.hidden_size
+        
+        # Account for first-last pooling which doubles the dimension
+        pooling_multiplier = 2 if pooling in ["first-last", "first-last-window"] else 1
+        
         if layer_fusion == "concat":
-            self._feature_dim = base_dim * len(self.layers)
+            self._feature_dim = base_dim * len(self.layers) * pooling_multiplier
         else:  # mean or weighted
-            self._feature_dim = base_dim
+            self._feature_dim = base_dim * pooling_multiplier
         
         # Learnable weights for weighted layer fusion
         if layer_fusion == "weighted":
@@ -276,6 +287,18 @@ class Wav2Vec2Extractor(FeatureExtractor):
                     pooled = features[:, 0, :]
                 elif self.pooling == "last":
                     pooled = features[:, -1, :]
+                elif self.pooling == "first-last":
+                    # Concatenate first and last frame
+                    first = features[:, 0, :]
+                    last = features[:, -1, :]
+                    pooled = torch.cat([first, last], dim=-1)
+                elif self.pooling == "first-last-window":
+                    # Concatenate mean of first 10% and last 10% windows
+                    seq_len = features.size(1)
+                    window_size = max(1, seq_len // 10)
+                    first_window = features[:, :window_size, :].mean(dim=1)
+                    last_window = features[:, -window_size:, :].mean(dim=1)
+                    pooled = torch.cat([first_window, last_window], dim=-1)
                 else:
                     raise ValueError(f"Unknown pooling: {self.pooling}")
                 
@@ -347,6 +370,21 @@ class HuBERTExtractor(FeatureExtractor):
                  device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
                  layers: Optional[List[int]] = None,
                  layer_fusion: str = "concat"):
+        """
+        Args:
+            model_name: HuggingFace model name
+            pooling: Pooling strategy ("mean", "max", "first", "last", "first-last", "first-last-window")
+                - "mean": Average features over time dimension
+                - "max": Max pooling over time dimension
+                - "first": Take first frame features
+                - "last": Take last frame features
+                - "first-last": Concatenate first and last frame features (doubles output dimension)
+                              Clinical use case: Capture voice degradation in ALS patients
+                - "first-last-window": Concatenate first and last 10% window features (doubles output dimension)
+            device: Device to run model on
+            layers: List of layer indices to extract (e.g., [6, 9, 12, 15, 18])
+            layer_fusion: How to combine multiple layers ("concat", "mean", "weighted")
+        """
         from transformers import HubertModel
 
         self.device = device
@@ -358,10 +396,14 @@ class HuBERTExtractor(FeatureExtractor):
         self.model.eval()
         
         base_dim = self.model.config.hidden_size
+        
+        # Account for first-last pooling which doubles the dimension
+        pooling_multiplier = 2 if pooling in ["first-last", "first-last-window"] else 1
+        
         if layer_fusion == "concat":
-            self._feature_dim = base_dim * len(self.layers)
+            self._feature_dim = base_dim * len(self.layers) * pooling_multiplier
         else:
-            self._feature_dim = base_dim
+            self._feature_dim = base_dim * pooling_multiplier
         
         if layer_fusion == "weighted":
             self.layer_weights = nn.Parameter(torch.ones(len(self.layers)))
@@ -393,6 +435,18 @@ class HuBERTExtractor(FeatureExtractor):
                     pooled = features[:, 0, :]
                 elif self.pooling == "last":
                     pooled = features[:, -1, :]
+                elif self.pooling == "first-last":
+                    # Concatenate first and last frame
+                    first = features[:, 0, :]
+                    last = features[:, -1, :]
+                    pooled = torch.cat([first, last], dim=-1)
+                elif self.pooling == "first-last-window":
+                    # Concatenate mean of first 10% and last 10% windows
+                    seq_len = features.size(1)
+                    window_size = max(1, seq_len // 10)
+                    first_window = features[:, :window_size, :].mean(dim=1)
+                    last_window = features[:, -window_size:, :].mean(dim=1)
+                    pooled = torch.cat([first_window, last_window], dim=-1)
                 else:
                     raise ValueError(f"Unknown pooling: {self.pooling}")
                 
@@ -462,6 +516,21 @@ class WavLMExtractor(FeatureExtractor):
                  device: str = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu",
                  layers: Optional[List[int]] = None,
                  layer_fusion: str = "concat"):
+        """
+        Args:
+            model_name: HuggingFace model name
+            pooling: Pooling strategy ("mean", "max", "first", "last", "first-last", "first-last-window")
+                - "mean": Average features over time dimension
+                - "max": Max pooling over time dimension
+                - "first": Take first frame features
+                - "last": Take last frame features
+                - "first-last": Concatenate first and last frame features (doubles output dimension)
+                              Clinical use case: Capture voice degradation in ALS patients
+                - "first-last-window": Concatenate first and last 10% window features (doubles output dimension)
+            device: Device to run model on
+            layers: List of layer indices to extract (e.g., [6, 9, 12, 15, 18])
+            layer_fusion: How to combine multiple layers ("concat", "mean", "weighted")
+        """
         from transformers import WavLMModel
 
         self.device = device
@@ -473,10 +542,14 @@ class WavLMExtractor(FeatureExtractor):
         self.model.eval()
         
         base_dim = self.model.config.hidden_size
+        
+        # Account for first-last pooling which doubles the dimension
+        pooling_multiplier = 2 if pooling in ["first-last", "first-last-window"] else 1
+        
         if layer_fusion == "concat":
-            self._feature_dim = base_dim * len(self.layers)
-        else:
-            self._feature_dim = base_dim
+            self._feature_dim = base_dim * len(self.layers) * pooling_multiplier
+        else:  # mean or weighted
+            self._feature_dim = base_dim * pooling_multiplier
         
         if layer_fusion == "weighted":
             self.layer_weights = nn.Parameter(torch.ones(len(self.layers)))
@@ -508,6 +581,18 @@ class WavLMExtractor(FeatureExtractor):
                     pooled = features[:, 0, :]
                 elif self.pooling == "last":
                     pooled = features[:, -1, :]
+                elif self.pooling == "first-last":
+                    # Concatenate first and last frame
+                    first = features[:, 0, :]
+                    last = features[:, -1, :]
+                    pooled = torch.cat([first, last], dim=-1)
+                elif self.pooling == "first-last-window":
+                    # Concatenate mean of first 10% and last 10% windows
+                    seq_len = features.size(1)
+                    window_size = max(1, seq_len // 10)
+                    first_window = features[:, :window_size, :].mean(dim=1)
+                    last_window = features[:, -window_size:, :].mean(dim=1)
+                    pooled = torch.cat([first_window, last_window], dim=-1)
                 else:
                     raise ValueError(f"Unknown pooling: {self.pooling}")
                 
@@ -2087,7 +2172,7 @@ def main():
     MODEL_SIZE = "large" if "large" in MODEL_NAME else "base"
 
     LAYERS = [6, 9, 12, 15, 18]  # Extract from multiple layers
-    LAYER_FUSION = "weighted"  # "concat", "mean", or "weighted"
+    LAYER_FUSION = "concat"  # "concat", "mean", or "weighted" # wav2wec (fertig), hubert (concat)
     
     # 🆕 Optimization #3: Fine-Tuning Configuration
     ENABLE_FINE_TUNING = True  # Enable/disable fine-tuning
