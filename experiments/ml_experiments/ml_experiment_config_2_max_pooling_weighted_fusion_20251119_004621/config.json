@@ -1,0 +1,53 @@
+{
+  "experiment_name": "ml_experiment_config_2_max_pooling_weighted_fusion_20251119_004621",
+  "timestamp": "2025-11-19T00:46:21.178772",
+  "experiment_type": "classical_ml_automated",
+  "config_name": "config_2_max_pooling_weighted_fusion",
+  "config_description": "Multi-layer (5 layers), max pooling, weighted fusion",
+  "feature_extractor": {
+    "type": "Wav2Vec2Extractor",
+    "model_name": "facebook/wav2vec2-large-960h",
+    "layers": [
+      6,
+      9,
+      12,
+      15,
+      18
+    ],
+    "layer_fusion": "weighted",
+    "pooling": "max",
+    "feature_dim_per_layer": 1024,
+    "feature_dim_total": 1024
+  },
+  "dataset": {
+    "train_samples": 219,
+    "val_samples": 53,
+    "num_classes": 5
+  },
+  "models_evaluated": [
+    {
+      "name": "SVM",
+      "best_params": {
+        "svm__C": 0.1,
+        "svm__gamma": "scale",
+        "svm__kernel": "linear"
+      },
+      "cv_f1_macro": 0.36393062637740936,
+      "val_f1_macro": 0.4303105590062112
+    },
+    {
+      "name": "Logistic Regression",
+      "best_params": {
+        "lr__C": 100,
+        "lr__penalty": "l2",
+        "lr__solver": "liblinear"
+      },
+      "cv_f1_macro": 0.38715431025004926,
+      "val_f1_macro": 0.4684057971014493
+    }
+  ],
+  "best_model": {
+    "name": "Logistic Regression",
+    "val_f1_macro": 0.4684057971014493
+  }
+}

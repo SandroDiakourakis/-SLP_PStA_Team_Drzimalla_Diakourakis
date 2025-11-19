@@ -1,0 +1,75 @@
+{
+  "experiment_name": "ml_experiment_20251118_234402",
+  "timestamp": "2025-11-18T23:44:02.381390",
+  "experiment_type": "classical_ml",
+  "feature_extractor": {
+    "type": "Wav2Vec2Extractor",
+    "model_name": "facebook/wav2vec2-large-960h",
+    "layers": [
+      6,
+      9,
+      12,
+      15,
+      18
+    ],
+    "layer_fusion": "concat",
+    "pooling": "max",
+    "feature_dim": 5120,
+    "feature_dim_per_layer": 1024
+  },
+  "fusion": {
+    "type": "late_fusion",
+    "strategy": "concatenation",
+    "num_files": 8,
+    "total_feature_dim": 40960
+  },
+  "dataset": {
+    "train_samples": 219,
+    "val_samples": 53,
+    "num_classes": 5,
+    "class_distribution_train": {
+      "0": 4,
+      "1": 22,
+      "2": 45,
+      "3": 62,
+      "4": 86
+    },
+    "class_distribution_val": {
+      "0": 2,
+      "1": 4,
+      "2": 12,
+      "3": 14,
+      "4": 21
+    }
+  },
+  "models_evaluated": [
+    {
+      "name": "SVM",
+      "best_params": {
+        "svm__C": 0.1,
+        "svm__gamma": "scale",
+        "svm__kernel": "linear"
+      },
+      "cv_f1_macro": 0.39430780294920825
+    },
+    {
+      "name": "Logistic Regression",
+      "best_params": {
+        "lr__C": 0.1,
+        "lr__penalty": "l2",
+        "lr__solver": "liblinear"
+      },
+      "cv_f1_macro": 0.4155260878551733
+    }
+  ],
+  "best_model": {
+    "name": "SVM",
+    "index": 0
+  },
+  "results": {
+    "best_model_name": "SVM",
+    "val_accuracy": 0.7169811320754716,
+    "val_f1_macro": 0.5420188507145028,
+    "val_f1_weighted": 0.7040535346523862
+  }
+}

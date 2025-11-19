@@ -1,0 +1,6 @@
+,Pred_Klasse 0,Pred_Klasse 1,Pred_Klasse 2,Pred_Klasse 3,Pred_Klasse 4
+True_Klasse 0,0,2,0,0,0
+True_Klasse 1,0,3,1,0,0
+True_Klasse 2,0,2,7,1,2
+True_Klasse 3,0,0,3,9,2
+True_Klasse 4,0,0,0,2,19
