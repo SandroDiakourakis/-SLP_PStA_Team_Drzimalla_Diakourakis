@@ -2170,17 +2170,17 @@ def main():
     # MODEL_NAME = "facebook/hubert-large-ll60k"
     # MODEL_NAME = "microsoft/wavlm-large"
     MODEL_SIZE = "large" if "large" in MODEL_NAME else "base"
-    POOLING = "first-last-window"  # "mean", "max", "first", "last", "first-last", "first-last-window"
+    POOLING = "mean"  # "mean", "max", "first", "last", "first-last", "first-last-window"
 
-    LAYERS = [6, 9, 12, 15, 18]  # Extract from multiple layers
-    LAYER_FUSION = "mean"  # "concat", "mean", or "weighted" # wav2wec (fertig), hubert (concat)
+    LAYERS = [6, 9, 12, 15, 18] #mal die letzten 6 Layer probieren  # Extract from multiple layers
+    LAYER_FUSION = "concat"  # "concat", "mean", or "weighted" # wav2wec (fertig), hubert (concat)
     
     # 🆕 Optimization #3: Fine-Tuning Configuration
-    ENABLE_FINE_TUNING = True  # Enable/disable fine-tuning
+    ENABLE_FINE_TUNING = False  # Enable/disable fine-tuning
     NUM_LAYERS_TO_FINETUNE = 4  # Number of top layers to fine-tune
     
     # 🆕 Optimization #5: Fusion Strategy Configuration
-    FUSION_STRATEGY = "attention"  # "concat" or "attention"
+    FUSION_STRATEGY = "concat"  # "concat" (standard) or "attention"
 
     # Model Architecture Configuration
     HIDDEN_DIM = 256
@@ -2199,7 +2199,7 @@ def main():
 
     # Augmentation Configuration
     AUGMENTATION_CONFIG = {
-        'enabled': True,
+        'enabled': False,
         'time_stretch_range': (0.9, 1.1),
         'pitch_shift_range': (-2, 2),
         'noise_snr_range': (25, 40),
@@ -2262,9 +2262,8 @@ def main():
         layer_fusion=LAYER_FUSION
     )
     
-    # Alternative: HuBERT or WavLM with multi-layer
     # feature_extractor = HuBERTExtractor(
-    #     model_name=MODEL_NAME, #"facebook/hubert-large-ll60k",
+    #     model_name=MODEL_NAME,
     #     pooling=POOLING,
     #     device=DEVICE,
     #     layers=LAYERS,
