@@ -1,0 +1,110 @@
+{
+  "experiment_name": "task2_5fold_cv_20260119_224134",
+  "timestamp": "2026-01-19T22:41:34.688215",
+  "task": "Task 2 - ALS Progression Prediction",
+  "evaluation_strategy": "5-Fold Stratified Cross-Validation",
+  "feature_extraction": {
+    "wav2vec2": {
+      "model_name": "facebook/wav2vec2-large-960h",
+      "layers": [
+        6,
+        9,
+        12,
+        15,
+        18
+      ],
+      "pooling": "mean",
+      "layer_fusion": "concat"
+    },
+    "hubert": {
+      "model_name": "facebook/hubert-large-ls960-ft",
+      "layers": [
+        6,
+        9,
+        12,
+        15,
+        18
+      ],
+      "pooling": "mean",
+      "layer_fusion": "concat"
+    },
+    "fusion_strategy": "concat"
+  },
+  "dataset": {
+    "total_samples": 132,
+    "num_classes": 4,
+    "feature_dim_audio": 81920,
+    "feature_dim_metadata": 4,
+    "feature_dim_total": 81924,
+    "class_distribution": {
+      "0": 18,
+      "1": 29,
+      "2": 38,
+      "3": 47
+    }
+  },
+  "results": {
+    "Random Forest": {
+      "f1_macro_mean": 0.40733130440251186,
+      "f1_macro_std": 0.03987033946110067,
+      "f1_macro_scores": [
+        0.47328671328671335,
+        0.4131794131794132,
+        0.34972234507838224,
+        0.4087301587301587,
+        0.39173789173789175
+      ]
+    },
+    "XGBoost": {
+      "f1_macro_mean": 0.5641640304140305,
+      "f1_macro_std": 0.04379652649212333,
+      "f1_macro_scores": [
+        0.5161255411255411,
+        0.6223290598290598,
+        0.5201388888888889,
+        0.6074481074481075,
+        0.5547785547785549
+      ]
+    },
+    "SVM": {
+      "f1_macro_mean": 0.3851468116768292,
+      "f1_macro_std": 0.0648926511886968,
+      "f1_macro_scores": [
+        0.4911111111111111,
+        0.42846153846153845,
+        0.341644385026738,
+        0.34748803827751196,
+        0.31702898550724634
+      ]
+    },
+    "Gradient Boosting": {
+      "f1_macro_mean": 0.4404233176524198,
+      "f1_macro_std": 0.10470831796524548,
+      "f1_macro_scores": [
+        0.5179292929292929,
+        0.3609625668449198,
+        0.5340659340659341,
+        0.5160818713450293,
+        0.2730769230769231
+      ]
+    },
+    "Voting Ensemble": {
+      "f1_macro_mean": 0.48561189627366097,
+      "f1_macro_std": 0.12460042109404897,
+      "f1_macro_scores": [
+        0.675,
+        0.5136904761904763,
+        0.47456922162804516,
+        0.48125,
+        0.28354978354978355
+      ]
+    }
+  },
+  "best_model": {
+    "name": "XGBoost",
+    "f1_macro_mean": 0.5641640304140305,
+    "f1_macro_std": 0.04379652649212333,
+    "baseline_f1": 0.583,
+    "improvement_over_baseline_percent": -1.8835969585969448
+  }
+}

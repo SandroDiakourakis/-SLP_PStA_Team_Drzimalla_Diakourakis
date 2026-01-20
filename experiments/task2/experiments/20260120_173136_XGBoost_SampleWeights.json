@@ -1,0 +1,21 @@
+{
+  "run_id": "20260120_173136",
+  "timestamp": "2026-01-20T17:31:36.102502",
+  "name": "XGBoost_SampleWeights",
+  "config": {
+    "model": "XGBoost",
+    "sample_weights": true
+  },
+  "results": {
+    "f1_macro_mean": 0.5290579710144927,
+    "f1_macro_std": 0.03679653372309173,
+    "f1_macro_scores": [
+      0.5599378881987577,
+      0.5099378881987577,
+      0.4652777777777778,
+      0.5589285714285714,
+      0.551207729468599
+    ]
+  },
+  "artifacts": []
+}

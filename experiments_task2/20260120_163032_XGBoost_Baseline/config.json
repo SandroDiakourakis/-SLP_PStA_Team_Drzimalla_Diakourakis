@@ -1,0 +1,48 @@
+{
+  "data_path": "../data/task2",
+  "excel_path": "../data/task2/sand_task_2.xlsx",
+  "task_dir": "../data/task2/training",
+  "output_dir": "../experiments_task2",
+  "n_folds": 5,
+  "cv_random_state": 42,
+  "wav2vec2_model": "facebook/wav2vec2-large-960h",
+  "wav2vec2_layers": [
+    6,
+    9,
+    12,
+    15,
+    18
+  ],
+  "wav2vec2_pooling": "mean",
+  "wav2vec2_fusion": "concat",
+  "hubert_model": "facebook/hubert-large-ls960-ft",
+  "hubert_layers": [
+    6,
+    9,
+    12,
+    15,
+    18
+  ],
+  "hubert_pooling": "mean",
+  "hubert_fusion": "concat",
+  "model_fusion_strategy": "concat",
+  "use_pca": false,
+  "pca_variance": 0.95,
+  "audio_types": [
+    "phonationA",
+    "phonationE",
+    "phonationI",
+    "phonationO",
+    "phonationU",
+    "rhythmKA",
+    "rhythmPA",
+    "rhythmTA"
+  ],
+  "xgb_n_estimators": 500,
+  "xgb_max_depth": 5,
+  "xgb_learning_rate": 0.1,
+  "xgb_subsample": 0.8,
+  "xgb_early_stopping": 20,
+  "xgb_eval_size": 0.2,
+  "global_seed": 42
+}
