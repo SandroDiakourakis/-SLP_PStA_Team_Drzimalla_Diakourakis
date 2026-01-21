@@ -1,0 +1,27 @@
+================================================================================
+SAND CHALLENGE - TASK 2: 5-FOLD CROSS-VALIDATION RESULTS
+================================================================================
+
+Experiment: 20260121_095848
+Total samples: 132
+Classes: 4
+
+MAIN RESULT:
+  F1-Macro: 0.4486 ± 0.0726
+
+Individual Folds:
+  Fold 1: 0.5540
+  Fold 2: 0.3816
+  Fold 3: 0.5063
+  Fold 4: 0.4381
+  Fold 5: 0.3631
+
+Per-Class Results:
+  Class 1: 0.6088 ± 0.1362
+  Class 2: 0.3299 ± 0.1948
+  Class 3: 0.2506 ± 0.1976
+  Class 4: 0.6053 ± 0.0757
+
+================================================================================
+For your professor: Results from 5-fold cross-validation on combined train+dev set
+================================================================================

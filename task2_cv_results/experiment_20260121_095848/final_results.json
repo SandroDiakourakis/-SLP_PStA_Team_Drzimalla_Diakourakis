@@ -1,0 +1,78 @@
+{
+  "mean_f1_macro": 0.4486372964691042,
+  "std_f1_macro": 0.07261422120125469,
+  "fold_f1_scores": [
+    0.554040404040404,
+    0.381578947368421,
+    0.5063405797101449,
+    0.43813131313131315,
+    0.3630952380952381
+  ],
+  "per_class_results": {
+    "class_1": {
+      "mean_f1": 0.6087878787878788,
+      "std_f1": 0.13620327270952795
+    },
+    "class_2": {
+      "mean_f1": 0.32987012987012987,
+      "std_f1": 0.1948294357212074
+    },
+    "class_3": {
+      "mean_f1": 0.2506280193236715,
+      "std_f1": 0.19758735218816892
+    },
+    "class_4": {
+      "mean_f1": 0.6052631578947368,
+      "std_f1": 0.07566266193981691
+    }
+  },
+  "timestamp": "20260121_095848",
+  "config": {
+    "DATA_DIR": "/Users/fabian.drzimalla/Master_Projects/SLP_PStA_Team_Drzimalla_Diakourakis/data/task2/training",
+    "METADATA_FILE": "/Users/fabian.drzimalla/Master_Projects/SLP_PStA_Team_Drzimalla_Diakourakis/data/task2/sand_task_2.xlsx",
+    "OUTPUT_DIR": "./task2_cv_results",
+    "PRETRAINED_MODEL_PATH": "/Users/fabian.drzimalla/Master_Projects/SLP_PStA_Team_Drzimalla_Diakourakis/experiments/experiments/experiment_20251116_132709/final_model_20251116_155016.pth",
+    "NUM_CLASSES": 4,
+    "NUM_FILES": 8,
+    "USE_TEMPORAL_FEATURES": true,
+    "N_FOLDS": 5,
+    "RANDOM_SEED": 42,
+    "MODEL_NAME": "facebook/wav2vec2-large",
+    "POOLING": "mean",
+    "LAYERS": null,
+    "LAYER_FUSION": "concat",
+    "FUSION_TYPE": "feature",
+    "FUSION_STRATEGY": "attention",
+    "HIDDEN_DIM": 512,
+    "FILE_PROCESSOR_DIM": 256,
+    "DROPOUT": 0.3,
+    "SHARED_FILE_PROCESSOR": false,
+    "BATCH_SIZE": 12,
+    "ACCUMULATION_STEPS": 4,
+    "EPOCHS": 10,
+    "LEARNING_RATE": 0.0001,
+    "WEIGHT_DECAY": 1e-05,
+    "MAX_GRAD_NORM": 1.0,
+    "EARLY_STOPPING_PATIENCE": 10,
+    "EARLY_STOPPING_METRIC": "f1",
+    "USE_AUGMENTATION": false,
+    "TIME_STRETCH_RANGE": [
+      0.9,
+      1.1
+    ],
+    "PITCH_SHIFT_RANGE": [
+      -2,
+      2
+    ],
+    "NOISE_SNR_RANGE": [
+      20,
+      40
+    ],
+    "TIME_MASK_PROB": 0.3,
+    "AUGMENTATION_PROB": 0.8,
+    "DEVICE": "mps",
+    "NUM_WORKERS": 0,
+    "USE_PRETRAINED": false,
+    "FINE_TUNE_LAYERS": 0
+  }
+}

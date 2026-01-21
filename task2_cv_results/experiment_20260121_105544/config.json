@@ -1,0 +1,52 @@
+{
+  "DATA_DIR": "/Users/fabian.drzimalla/Master_Projects/SLP_PStA_Team_Drzimalla_Diakourakis/data/task2/training",
+  "METADATA_FILE": "/Users/fabian.drzimalla/Master_Projects/SLP_PStA_Team_Drzimalla_Diakourakis/data/task2/sand_task_2.xlsx",
+  "OUTPUT_DIR": "./task2_cv_results",
+  "PRETRAINED_MODEL_PATH": "/Users/fabian.drzimalla/Master_Projects/SLP_PStA_Team_Drzimalla_Diakourakis/experiments/experiments/experiment_20251116_132709/final_model_20251116_155016.pth",
+  "NUM_CLASSES": 4,
+  "NUM_FILES": 8,
+  "USE_TEMPORAL_FEATURES": true,
+  "N_FOLDS": 5,
+  "RANDOM_SEED": 42,
+  "MODEL_NAME": "facebook/wav2vec2-large",
+  "POOLING": "mean",
+  "LAYERS": [
+    9,
+    12,
+    15
+  ],
+  "LAYER_FUSION": "concat",
+  "FUSION_TYPE": "feature",
+  "FUSION_STRATEGY": "attention",
+  "HIDDEN_DIM": 512,
+  "FILE_PROCESSOR_DIM": 256,
+  "DROPOUT": 0.3,
+  "SHARED_FILE_PROCESSOR": false,
+  "BATCH_SIZE": 12,
+  "ACCUMULATION_STEPS": 4,
+  "EPOCHS": 10,
+  "LEARNING_RATE": 0.0001,
+  "WEIGHT_DECAY": 1e-05,
+  "MAX_GRAD_NORM": 1.0,
+  "EARLY_STOPPING_PATIENCE": 10,
+  "EARLY_STOPPING_METRIC": "f1",
+  "USE_AUGMENTATION": false,
+  "TIME_STRETCH_RANGE": [
+    0.9,
+    1.1
+  ],
+  "PITCH_SHIFT_RANGE": [
+    -2,
+    2
+  ],
+  "NOISE_SNR_RANGE": [
+    20,
+    40
+  ],
+  "TIME_MASK_PROB": 0.3,
+  "AUGMENTATION_PROB": 0.8,
+  "DEVICE": "mps",
+  "NUM_WORKERS": 0,
+  "USE_PRETRAINED": false,
+  "FINE_TUNE_LAYERS": 0
+}
