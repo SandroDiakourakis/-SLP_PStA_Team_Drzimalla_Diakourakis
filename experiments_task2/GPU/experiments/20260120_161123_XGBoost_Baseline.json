@@ -1,0 +1,14 @@
+{
+  "run_id": "20260120_161123",
+  "timestamp": "2026-01-20T16:11:23.965058",
+  "name": "XGBoost_Baseline",
+  "config": {
+    "model": "XGBoost",
+    "use_gpu": true
+  },
+  "results": {
+    "f1_macro_mean": 0.5130946614482419,
+    "f1_macro_std": 0.07934224953838746
+  },
+  "artifacts": []
+}

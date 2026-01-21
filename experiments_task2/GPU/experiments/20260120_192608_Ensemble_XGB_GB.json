@@ -1,0 +1,17 @@
+{
+  "run_id": "20260120_192608",
+  "timestamp": "2026-01-20T19:26:08.526931",
+  "name": "Ensemble_XGB_GB",
+  "config": {
+    "model": "Ensemble",
+    "weights": [
+      1,
+      1
+    ]
+  },
+  "results": {
+    "f1_macro_mean": 0.5518792464284792,
+    "f1_macro_std": 0.05801639048904222
+  },
+  "artifacts": []
+}
