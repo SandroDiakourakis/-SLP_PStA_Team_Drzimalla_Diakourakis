@@ -49,7 +49,7 @@ import soundfile as sf
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Union
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import logging
 import pandas as pd
@@ -109,7 +109,7 @@ class Task2Config:
     # ==================== MODEL ARCHITECTURE ====================
     MODEL_NAME: str = "facebook/wav2vec2-large"
     POOLING: str = "mean"  # mean, max, first-last
-    LAYERS: Optional[List[int]] = None  # e.g., [7, 11, 15] for multi-layer
+    LAYERS: Optional[List[int]] = field(default_factory=lambda: [9, 12, 15])  # for multi-layer
     LAYER_FUSION: str = "concat"  # concat, mean, weighted
     
     FUSION_TYPE: str = "feature"  # feature or decision
